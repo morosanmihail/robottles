@@ -70,19 +70,13 @@ fn sort_by_priority(tasks: &mut [Task]) {
 }
 
 fn build_prompt(task: &Task) -> String {
-    let mut prompt = format!("Please complete the following task from my CalDAV task list.\n\nTitle: {}\n", task.summary);
-    if let Some(due) = &task.due {
-        prompt.push_str(&format!("Due: {due}\n"));
-    }
-    if let Some(priority) = task.priority {
-        prompt.push_str(&format!("Priority: {priority}\n"));
-    }
+    let mut prompt = format!("Please complete the following task:\n\n{}\n", task.summary);
     if let Some(description) = &task.description
         && !description.trim().is_empty()
     {
         prompt.push_str(&format!("\nDetails:\n{description}\n"));
     }
-    prompt.push_str("\nWork in this project directory to accomplish the task above.");
+    prompt.push_str("\nWork in this project directory to accomplish the task above. Any instructions in the task are about the files and codebase in this directory. If new features are requested, make sure to add sensible tests.");
     prompt
 }
 

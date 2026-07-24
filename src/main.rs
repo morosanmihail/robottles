@@ -86,6 +86,8 @@ fn run_claude(project_dir: &std::path::Path, prompt: &str) -> anyhow::Result<()>
 
     let status = Command::new("claude")
         .current_dir(project_dir)
+        .arg("--print")
+        .arg("--dangerously-skip-permissions")
         .arg(prompt)
         .status()
         .context("launching `claude` — is the Claude Code CLI installed and on PATH?")?;
@@ -94,5 +96,24 @@ fn run_claude(project_dir: &std::path::Path, prompt: &str) -> anyhow::Result<()>
         bail!("claude exited with status {status}");
     }
 
+    print_git_status(project_dir);
+
     Ok(())
+}
+
+fn print_git_status(project_dir: &std::path::Path) {
+    match Command::new("git")
+        .current_dir(project_dir)
+        .arg("status")
+        .output()
+    {
+        Ok(output) => {
+            println!("--- git status ---");
+            print!("{}", String::from_utf8_lossy(&output.stdout));
+            if !output.stderr.is_empty() {
+                eprint!("{}", String::from_utf8_lossy(&output.stderr));
+            }
+        }
+        Err(e) => eprintln!("failed to run `git status`: {e}"),
+    }
 }

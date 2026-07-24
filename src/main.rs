@@ -1,14 +1,11 @@
-mod caldav;
-mod config;
-mod ical;
-
 use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{bail, Context};
 
-use config::Config;
-use ical::Task;
+use auto_worker::caldav;
+use auto_worker::config::Config;
+use auto_worker::ical::Task;
 
 fn main() -> anyhow::Result<()> {
     let config_path = std::env::args()
@@ -43,6 +40,10 @@ fn main() -> anyhow::Result<()> {
 
     let prompt = build_prompt(task);
     run_claude(&cfg.project.path, &prompt)?;
+
+    println!("Marking task [{}] as completed in CalDAV", task.uid);
+    caldav::mark_completed(&cfg.caldav, task)
+        .with_context(|| format!("marking task {} as completed in CalDAV", task.uid))?;
 
     Ok(())
 }

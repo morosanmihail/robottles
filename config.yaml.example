@@ -1,0 +1,10 @@
+caldav:
+  # Full URL to the CalDAV task-list (VTODO) collection.
+  url: "https://example.com/remote.php/dav/calendars/myuser/tasks/"
+  username: "myuser"
+  # App password / token used as the basic-auth password.
+  token: "my-app-token"
+
+project:
+  # Local folder Claude should work in when solving the picked task.
+  path: "/home/myuser/projects/my-project"

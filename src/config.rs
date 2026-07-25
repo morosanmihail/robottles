@@ -210,6 +210,14 @@ pub struct ProjectConfig {
     /// finishes a task. Defaults to `true`.
     #[serde(default = "default_true")]
     pub commit_changes: bool,
+    /// Whether to perform any git operations (default-branch sync, task
+    /// branches, commits/pushes) against this target's project folder at
+    /// all. Defaults to `true`; set to `false` for a project folder that
+    /// isn't a git repository. When `true` (the default) and the project
+    /// folder turns out not to be a git repository, the target fails
+    /// cleanly rather than running git commands against it.
+    #[serde(default = "default_true")]
+    pub git_enabled: bool,
     /// Which agent runner carries out the task. Defaults to `claude`.
     #[serde(default)]
     pub agent: RunnerConfig,
@@ -448,6 +456,35 @@ targets:
 "#;
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         assert!(!cfg.targets["main"].project.commit_changes);
+    }
+
+    #[test]
+    fn git_enabled_defaults_to_true() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: dummy
+    project:
+      path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.targets["main"].project.git_enabled);
+    }
+
+    #[test]
+    fn git_enabled_can_be_disabled() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: dummy
+    project:
+      path: "/tmp/project"
+      git_enabled: false
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.targets["main"].project.git_enabled);
     }
 
     #[test]

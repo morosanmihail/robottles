@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -5,10 +6,30 @@ use anyhow::{bail, Context};
 
 use robottles::config::{Config, ExecutionConfig, TargetConfig};
 use robottles::git::{
-    cleanup_unused_branch, commit_changes, prepare_branch, sync_default_branch,
+    cleanup_unused_branch, commit_changes, is_git_repo, prepare_branch, sync_default_branch,
     working_tree_dirty,
 };
 use robottles::task_source::ical::Task;
+
+/// The configured project path has `git_enabled` set (the default) but isn't
+/// actually a git repository. Distinguished from other task-running errors
+/// so `main` can exit cleanly for it in one-shot mode instead of surfacing a
+/// nonzero exit code, while loop mode just logs and moves on like any other
+/// per-iteration error.
+#[derive(Debug)]
+struct NotAGitRepo(PathBuf);
+
+impl fmt::Display for NotAGitRepo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "configured project path {} is not a git repository, but git_enabled is true for this target",
+            self.0.display()
+        )
+    }
+}
+
+impl std::error::Error for NotAGitRepo {}
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -25,7 +46,13 @@ fn main() -> anyhow::Result<()> {
             let target = cfg
                 .into_target(target_name.as_deref())
                 .context("selecting target to run against")?;
-            run_task(target)
+            match run_task(target) {
+                Err(err) if err.downcast_ref::<NotAGitRepo>().is_some() => {
+                    eprintln!("Error: {err}");
+                    Ok(())
+                }
+                other => other,
+            }
         }
         ExecutionConfig::Loop { delay_secs } => run_loop(&cfg, Duration::from_secs(delay_secs)),
     }
@@ -89,30 +116,40 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
         );
     }
 
-    sync_default_branch(&project.path)
-        .with_context(|| format!("syncing default branch in {}", project.path.display()))?;
+    if project.git_enabled && !is_git_repo(&project.path) {
+        return Err(NotAGitRepo(project.path.clone()).into());
+    }
 
     let branch = derive_branch_name(task);
-    prepare_branch(&project.path, &branch)
-        .with_context(|| format!("preparing branch {branch} for task {}", task.uid))?;
+
+    if project.git_enabled {
+        sync_default_branch(&project.path)
+            .with_context(|| format!("syncing default branch in {}", project.path.display()))?;
+        prepare_branch(&project.path, &branch)
+            .with_context(|| format!("preparing branch {branch} for task {}", task.uid))?;
+    } else {
+        println!("Skipping git operations (git_enabled is disabled in config).");
+    }
 
     let prompt = build_prompt(task);
     let runner = project.agent.build();
     runner.run(&project.path, &prompt)?;
 
-    if working_tree_dirty(&project.path)? {
-        if project.commit_changes {
-            commit_changes(&project.path, &branch, task).with_context(|| {
-                format!("committing task {} changes to branch {branch}", task.uid)
-            })?;
+    if project.git_enabled {
+        if working_tree_dirty(&project.path)? {
+            if project.commit_changes {
+                commit_changes(&project.path, &branch, task).with_context(|| {
+                    format!("committing task {} changes to branch {branch}", task.uid)
+                })?;
+            } else {
+                println!("Skipping git commit (commit_changes is disabled in config).");
+            }
         } else {
-            println!("Skipping git commit (commit_changes is disabled in config).");
+            println!("Agent made no changes; cleaning up branch {branch}.");
+            cleanup_unused_branch(&project.path, &branch).with_context(|| {
+                format!("cleaning up unused branch {branch} for task {}", task.uid)
+            })?;
         }
-    } else {
-        println!("Agent made no changes; cleaning up branch {branch}.");
-        cleanup_unused_branch(&project.path, &branch).with_context(|| {
-            format!("cleaning up unused branch {branch} for task {}", task.uid)
-        })?;
     }
 
     println!("Marking task [{}] as completed", task.uid);
@@ -182,6 +219,7 @@ fn sanitize_branch_component(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use robottles::config::{ProjectConfig, RunnerConfig, SourceConfig};
 
     fn task_with(uid: &str, summary: &str, description: Option<&str>) -> Task {
         Task {
@@ -193,6 +231,98 @@ mod tests {
             description: description.map(str::to_string),
             href: String::new(),
         }
+    }
+
+    /// A dummy-source, noop-agent target against `path`, so `run_task` can be
+    /// exercised end to end without a real task supplier or coding agent.
+    fn dummy_target(path: PathBuf, git_enabled: bool) -> TargetConfig {
+        TargetConfig {
+            source: SourceConfig::Dummy,
+            project: ProjectConfig {
+                path,
+                commit_changes: true,
+                git_enabled,
+                agent: RunnerConfig::Noop,
+            },
+        }
+    }
+
+    /// Run a git command, panicking on failure. Only for test setup, where a
+    /// failure means the test fixture itself is broken.
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .unwrap_or_else(|e| panic!("running `git {}`: {e}", args.join(" ")));
+        assert!(status.success(), "`git {}` failed", args.join(" "));
+    }
+
+    /// Set up a work tree with an `origin` remote (a local bare repo) and one
+    /// commit on `main`, ready for `run_task` tests with `git_enabled: true`.
+    fn init_repo_with_origin() -> (tempfile::TempDir, tempfile::TempDir) {
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare", "-q", "-b", "main"]);
+
+        let work = tempfile::tempdir().unwrap();
+        git(work.path(), &["init", "-q"]);
+        git(work.path(), &["config", "user.email", "test@example.com"]);
+        git(work.path(), &["config", "user.name", "Test User"]);
+        std::fs::write(work.path().join("README.md"), "hello\n").unwrap();
+        git(work.path(), &["add", "-A"]);
+        git(work.path(), &["commit", "-q", "-m", "initial commit"]);
+        git(work.path(), &["branch", "-M", "main"]);
+        git(
+            work.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        git(work.path(), &["push", "-q", "-u", "origin", "main"]);
+
+        (origin, work)
+    }
+
+    #[test]
+    fn run_task_with_git_disabled_succeeds_in_non_git_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dummy_target(dir.path().to_path_buf(), false);
+        run_task(target).unwrap();
+    }
+
+    #[test]
+    fn run_task_with_git_enabled_fails_cleanly_in_non_git_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dummy_target(dir.path().to_path_buf(), true);
+        let err = run_task(target).unwrap_err();
+        assert!(
+            err.downcast_ref::<NotAGitRepo>().is_some(),
+            "expected a NotAGitRepo error, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn run_task_with_git_enabled_runs_git_operations_in_a_real_repo() {
+        let (_origin, work) = init_repo_with_origin();
+        let target = dummy_target(work.path().to_path_buf(), true);
+        run_task(target).unwrap();
+        // Dummy task makes no changes, so run_task should have cleaned up
+        // the task branch and left the repo back on `main`.
+        assert_eq!(
+            robottles::git::current_branch(work.path()).unwrap(),
+            "main"
+        );
+    }
+
+    #[test]
+    fn run_task_with_git_disabled_skips_git_operations_in_a_real_repo() {
+        let (_origin, work) = init_repo_with_origin();
+        let starting_branch = robottles::git::current_branch(work.path()).unwrap();
+        let target = dummy_target(work.path().to_path_buf(), false);
+        run_task(target).unwrap();
+        // No branch should have been created/switched to.
+        assert_eq!(
+            robottles::git::current_branch(work.path()).unwrap(),
+            starting_branch
+        );
     }
 
     #[test]

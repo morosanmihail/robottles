@@ -5,6 +5,16 @@ use anyhow::{bail, Context};
 
 use crate::task_source::ical::Task;
 
+/// True if `project_dir` is inside a git working tree.
+pub fn is_git_repo(project_dir: &Path) -> bool {
+    Command::new("git")
+        .current_dir(project_dir)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 pub fn print_git_status(project_dir: &Path) {
     match Command::new("git")
         .current_dir(project_dir)
@@ -350,6 +360,18 @@ mod tests {
             !remote_branches.stdout.is_empty(),
             "expected task_branch to have been pushed to origin"
         );
+    }
+
+    #[test]
+    fn is_git_repo_true_for_git_working_tree() {
+        let (_origin, work) = init_repo_with_origin();
+        assert!(is_git_repo(work.path()));
+    }
+
+    #[test]
+    fn is_git_repo_false_for_non_git_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_git_repo(dir.path()));
     }
 
     #[test]

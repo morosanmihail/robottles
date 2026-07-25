@@ -42,6 +42,14 @@ pub struct CaldavConfig {
 pub struct ProjectConfig {
     /// Local folder containing the project Claude should work in.
     pub path: PathBuf,
+    /// Whether to commit (and push) Claude's changes to git after it
+    /// finishes a task. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub commit_changes: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Config {
@@ -90,5 +98,30 @@ project:
 "#;
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         assert!(matches!(cfg.source, SourceConfig::Dummy));
+    }
+
+    #[test]
+    fn commit_changes_defaults_to_true() {
+        let yaml = r#"
+source:
+  type: dummy
+project:
+  path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.project.commit_changes);
+    }
+
+    #[test]
+    fn commit_changes_can_be_disabled() {
+        let yaml = r#"
+source:
+  type: dummy
+project:
+  path: "/tmp/project"
+  commit_changes: false
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.project.commit_changes);
     }
 }

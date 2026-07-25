@@ -41,8 +41,13 @@ fn main() -> anyhow::Result<()> {
     let prompt = build_prompt(task);
     run_claude(&project.path, &prompt)?;
 
-    commit_changes(&project.path, &branch, task)
-        .with_context(|| format!("committing task {} changes to branch {branch}", task.uid))?;
+    if project.commit_changes {
+        commit_changes(&project.path, &branch, task).with_context(|| {
+            format!("committing task {} changes to branch {branch}", task.uid)
+        })?;
+    } else {
+        println!("Skipping git commit (commit_changes is disabled in config).");
+    }
 
     println!("Marking task [{}] as completed", task.uid);
     source

@@ -5,6 +5,15 @@
 #   robottles config.yaml project2
 #
 # If only one target is configured, the name can be omitted.
+
+# Optional. Controls whether robottles does one task and exits (the
+# default), or runs forever, picking a task for the next configured target
+# each iteration until manually stopped (e.g. with Ctrl-C).
+execution:
+  mode: loop
+  # Delay between loop iterations, in seconds. Defaults to 300 (5 minutes).
+  delay_secs: 300
+
 targets:
   project1:
     source:

@@ -1,8 +1,9 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{bail, Context};
 
-use robottles::config::Config;
+use robottles::config::{Config, ExecutionConfig, TargetConfig};
 use robottles::git::{
     cleanup_unused_branch, commit_changes, prepare_branch, sync_default_branch,
     working_tree_dirty,
@@ -18,9 +19,55 @@ fn main() -> anyhow::Result<()> {
     let target_name = args.next();
 
     let cfg = Config::load(&config_path)?;
-    let target = cfg
-        .into_target(target_name.as_deref())
-        .context("selecting target to run against")?;
+
+    match cfg.execution.clone() {
+        ExecutionConfig::Once => {
+            let target = cfg
+                .into_target(target_name.as_deref())
+                .context("selecting target to run against")?;
+            run_task(target)
+        }
+        ExecutionConfig::Loop { delay_secs } => run_loop(&cfg, Duration::from_secs(delay_secs)),
+    }
+}
+
+/// Repeatedly picks a task for the next configured target (cycling through
+/// all targets in a stable order) and runs it, sleeping `delay` between
+/// iterations, until the process is manually stopped. Errors from an
+/// individual iteration are logged rather than aborting the loop, since a
+/// transient failure on one target shouldn't stop the others from being
+/// worked on.
+fn run_loop(cfg: &Config, delay: Duration) -> anyhow::Result<()> {
+    let target_names = cfg.target_names();
+    if target_names.is_empty() {
+        bail!("no targets configured");
+    }
+
+    let mut iteration = 0usize;
+    loop {
+        let name = &target_names[next_target_index(target_names.len(), iteration)];
+        println!("=== Loop iteration: target '{name}' ===");
+        let target = cfg
+            .target(name)
+            .unwrap_or_else(|| panic!("target '{name}' vanished from config"));
+        if let Err(err) = run_task(target) {
+            eprintln!("Error running task for target '{name}': {err:?}");
+        }
+        iteration += 1;
+
+        println!("Sleeping {}s before next iteration", delay.as_secs());
+        std::thread::sleep(delay);
+    }
+}
+
+/// Which target index to use on a given loop iteration, cycling round-robin
+/// through `target_count` configured targets.
+fn next_target_index(target_count: usize, iteration: usize) -> usize {
+    iteration % target_count
+}
+
+/// Fetches and completes a single task for one target.
+fn run_task(target: TargetConfig) -> anyhow::Result<()> {
     let project = target.project;
     let source = target.source.build();
 
@@ -146,6 +193,21 @@ mod tests {
             description: description.map(str::to_string),
             href: String::new(),
         }
+    }
+
+    #[test]
+    fn next_target_index_cycles_round_robin() {
+        assert_eq!(next_target_index(3, 0), 0);
+        assert_eq!(next_target_index(3, 1), 1);
+        assert_eq!(next_target_index(3, 2), 2);
+        assert_eq!(next_target_index(3, 3), 0);
+        assert_eq!(next_target_index(3, 4), 1);
+    }
+
+    #[test]
+    fn next_target_index_with_single_target_always_zero() {
+        assert_eq!(next_target_index(1, 0), 0);
+        assert_eq!(next_target_index(1, 5), 0);
     }
 
     #[test]

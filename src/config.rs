@@ -16,20 +16,45 @@ use crate::task_source::TaskSource;
 
 /// Top-level config: a named set of targets. Each target is an independent
 /// combination of task source, agent and project folder; a single run of
-/// the application picks exactly one target to work against.
+/// the application picks exactly one target to work against (or, in loop
+/// execution mode, cycles through all of them).
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub targets: BTreeMap<String, TargetConfig>,
+    /// How the application runs: once and exit, or forever in a loop.
+    /// Defaults to running once.
+    #[serde(default)]
+    pub execution: ExecutionConfig,
 }
 
-#[derive(Debug, Deserialize)]
+/// Whether to run a single task and exit, or keep running forever, picking
+/// a task for the next configured target each iteration with a delay in
+/// between.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum ExecutionConfig {
+    #[default]
+    Once,
+    Loop {
+        /// Delay between loop iterations, in seconds. Defaults to 300 (5
+        /// minutes).
+        #[serde(default = "default_loop_delay_secs")]
+        delay_secs: u64,
+    },
+}
+
+fn default_loop_delay_secs() -> u64 {
+    300
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct TargetConfig {
     pub source: SourceConfig,
     pub project: ProjectConfig,
 }
 
 /// Which task supplier to use, and its supplier-specific configuration.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SourceConfig {
     Caldav(CaldavConfig),
@@ -51,7 +76,7 @@ impl SourceConfig {
 
 /// Which agent runner to use to carry out a task's prompt against the
 /// project checkout.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum RunnerConfig {
     #[default]
@@ -103,7 +128,7 @@ fn default_lmstudio_timeout_secs() -> u64 {
     1800
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct CaldavConfig {
     /// Full URL of the CalDAV task-list (VTODO) collection.
     pub url: String,
@@ -111,7 +136,7 @@ pub struct CaldavConfig {
     pub token: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct GithubConfig {
     /// Repository owner (user or org).
     pub owner: String,
@@ -134,7 +159,7 @@ fn default_priority_labels() -> Vec<String> {
     ]
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct JiraConfig {
     /// Base url of the Jira site, e.g. `https://yourorg.atlassian.net`.
     pub base_url: String,
@@ -177,7 +202,7 @@ fn default_jira_priority_order() -> Vec<String> {
     ]
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ProjectConfig {
     /// Local folder containing the project Claude should work in.
     pub path: PathBuf,
@@ -228,6 +253,18 @@ impl Config {
 
     fn target_names_joined(&self) -> String {
         self.targets.keys().cloned().collect::<Vec<_>>().join(", ")
+    }
+
+    /// All configured target names, in a stable order, for cycling through
+    /// them in loop execution mode.
+    pub fn target_names(&self) -> Vec<String> {
+        self.targets.keys().cloned().collect()
+    }
+
+    /// Look up a target's config by name without consuming the `Config`, so
+    /// it can be re-fetched on every iteration of loop execution mode.
+    pub fn target(&self, name: &str) -> Option<TargetConfig> {
+        self.targets.get(name).cloned()
     }
 }
 
@@ -550,6 +587,59 @@ targets:
         let cfg: Config = serde_yaml::from_str(multi_target_yaml()).unwrap();
         let err = cfg.into_target(None).unwrap_err();
         assert!(err.to_string().contains("multiple targets configured"));
+    }
+
+    #[test]
+    fn execution_defaults_to_once() {
+        let cfg: Config = serde_yaml::from_str(multi_target_yaml()).unwrap();
+        assert!(matches!(cfg.execution, ExecutionConfig::Once));
+    }
+
+    #[test]
+    fn execution_can_be_set_to_loop_with_default_delay() {
+        let yaml = format!(
+            "{}\nexecution:\n  mode: loop\n",
+            multi_target_yaml()
+        );
+        let cfg: Config = serde_yaml::from_str(&yaml).unwrap();
+        match cfg.execution {
+            ExecutionConfig::Loop { delay_secs } => assert_eq!(delay_secs, 300),
+            _ => panic!("expected loop execution mode"),
+        }
+    }
+
+    #[test]
+    fn execution_loop_delay_can_be_customized() {
+        let yaml = format!(
+            "{}\nexecution:\n  mode: loop\n  delay_secs: 60\n",
+            multi_target_yaml()
+        );
+        let cfg: Config = serde_yaml::from_str(&yaml).unwrap();
+        match cfg.execution {
+            ExecutionConfig::Loop { delay_secs } => assert_eq!(delay_secs, 60),
+            _ => panic!("expected loop execution mode"),
+        }
+    }
+
+    #[test]
+    fn target_names_returns_all_configured_targets() {
+        let cfg: Config = serde_yaml::from_str(multi_target_yaml()).unwrap();
+        assert_eq!(cfg.target_names(), vec!["project1", "project2"]);
+    }
+
+    #[test]
+    fn target_looks_up_by_name_without_consuming_config() {
+        let cfg: Config = serde_yaml::from_str(multi_target_yaml()).unwrap();
+        let target = cfg.target("project2").unwrap();
+        assert_eq!(target.project.path, PathBuf::from("/tmp/project2"));
+        // `cfg` is still usable afterwards, unlike `into_target`.
+        assert!(cfg.target("project1").is_some());
+    }
+
+    #[test]
+    fn target_returns_none_for_unknown_name() {
+        let cfg: Config = serde_yaml::from_str(multi_target_yaml()).unwrap();
+        assert!(cfg.target("nope").is_none());
     }
 
     #[test]

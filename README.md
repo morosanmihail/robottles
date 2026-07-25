@@ -43,6 +43,16 @@ robottles config.yaml project2
 
 A single run only ever works on one task in one target's project folder, even if several targets are configured. If the config only has one target, the name can be omitted. See `config.yaml.example` for the full format.
 
+## Loop mode
+
+By default robottles does one task and exits. Set `execution.mode: loop` in `config.yaml` to instead have it run forever: each iteration picks a task for the next configured target (cycling round-robin through all of them), then sleeps `execution.delay_secs` (default 300, i.e. 5 minutes) before moving on. It keeps going until manually stopped (e.g. Ctrl-C). A failure on one iteration is logged and doesn't stop the loop.
+
+```yaml
+execution:
+  mode: loop
+  delay_secs: 300
+```
+
 ## Installation
 
 ### Build from source

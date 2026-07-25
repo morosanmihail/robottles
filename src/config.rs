@@ -9,6 +9,7 @@ use crate::agent::noop::NoopRunner;
 use crate::agent::AgentRunner;
 use crate::task_source::caldav::CaldavTaskSource;
 use crate::task_source::dummy::DummyTaskSource;
+use crate::task_source::github::GithubTaskSource;
 use crate::task_source::TaskSource;
 
 /// Top-level config: a named set of targets. Each target is an independent
@@ -30,6 +31,7 @@ pub struct TargetConfig {
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum SourceConfig {
     Caldav(CaldavConfig),
+    Github(GithubConfig),
     Dummy,
 }
 
@@ -37,6 +39,7 @@ impl SourceConfig {
     pub fn build(self) -> Box<dyn TaskSource> {
         match self {
             SourceConfig::Caldav(cfg) => Box::new(CaldavTaskSource::new(cfg)),
+            SourceConfig::Github(cfg) => Box::new(GithubTaskSource::new(cfg)),
             SourceConfig::Dummy => Box::new(DummyTaskSource),
         }
     }
@@ -67,6 +70,29 @@ pub struct CaldavConfig {
     pub url: String,
     pub username: String,
     pub token: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GithubConfig {
+    /// Repository owner (user or org).
+    pub owner: String,
+    pub repo: String,
+    /// GitHub personal access token, used as a bearer token.
+    pub token: String,
+    /// Label names, highest priority first. An open issue's priority is the
+    /// position of the highest-ranked one of these labels it carries;
+    /// issues with none of these labels sort last.
+    #[serde(default = "default_priority_labels")]
+    pub priority_labels: Vec<String>,
+}
+
+fn default_priority_labels() -> Vec<String> {
+    vec![
+        "priority:critical".to_string(),
+        "priority:high".to_string(),
+        "priority:medium".to_string(),
+        "priority:low".to_string(),
+    ]
 }
 
 #[derive(Debug, Deserialize)]
@@ -147,7 +173,58 @@ targets:
                 assert_eq!(caldav.username, "myuser");
                 assert_eq!(caldav.token, "mytoken");
             }
-            SourceConfig::Dummy => panic!("expected caldav source"),
+            _ => panic!("expected caldav source"),
+        }
+    }
+
+    #[test]
+    fn parses_github_source() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: github
+      owner: "myorg"
+      repo: "myrepo"
+      token: "mytoken"
+    project:
+      path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        match &cfg.targets["main"].source {
+            SourceConfig::Github(github) => {
+                assert_eq!(github.owner, "myorg");
+                assert_eq!(github.repo, "myrepo");
+                assert_eq!(github.token, "mytoken");
+                assert_eq!(
+                    github.priority_labels,
+                    vec!["priority:critical", "priority:high", "priority:medium", "priority:low"]
+                );
+            }
+            _ => panic!("expected github source"),
+        }
+    }
+
+    #[test]
+    fn parses_github_source_with_custom_priority_labels() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: github
+      owner: "myorg"
+      repo: "myrepo"
+      token: "mytoken"
+      priority_labels: ["P0", "P1", "P2"]
+    project:
+      path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        match &cfg.targets["main"].source {
+            SourceConfig::Github(github) => {
+                assert_eq!(github.priority_labels, vec!["P0", "P1", "P2"]);
+            }
+            _ => panic!("expected github source"),
         }
     }
 

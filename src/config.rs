@@ -11,6 +11,7 @@ use crate::agent::AgentRunner;
 use crate::task_source::caldav::CaldavTaskSource;
 use crate::task_source::dummy::DummyTaskSource;
 use crate::task_source::github::GithubTaskSource;
+use crate::task_source::jira::JiraTaskSource;
 use crate::task_source::TaskSource;
 
 /// Top-level config: a named set of targets. Each target is an independent
@@ -33,6 +34,7 @@ pub struct TargetConfig {
 pub enum SourceConfig {
     Caldav(CaldavConfig),
     Github(GithubConfig),
+    Jira(JiraConfig),
     Dummy,
 }
 
@@ -41,6 +43,7 @@ impl SourceConfig {
         match self {
             SourceConfig::Caldav(cfg) => Box::new(CaldavTaskSource::new(cfg)),
             SourceConfig::Github(cfg) => Box::new(GithubTaskSource::new(cfg)),
+            SourceConfig::Jira(cfg) => Box::new(JiraTaskSource::new(cfg)),
             SourceConfig::Dummy => Box::new(DummyTaskSource),
         }
     }
@@ -128,6 +131,49 @@ fn default_priority_labels() -> Vec<String> {
         "priority:high".to_string(),
         "priority:medium".to_string(),
         "priority:low".to_string(),
+    ]
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JiraConfig {
+    /// Base url of the Jira site, e.g. `https://yourorg.atlassian.net`.
+    pub base_url: String,
+    /// Id of the board to pull issues from.
+    pub board_id: u64,
+    /// Email address of the Jira account to authenticate as.
+    pub email: String,
+    /// Jira API token, used with `email` for basic auth.
+    pub api_token: String,
+    /// Status name that marks an issue as ready to work on. Defaults to
+    /// "To Do".
+    #[serde(default = "default_jira_todo_status")]
+    pub todo_status: String,
+    /// Status an issue is transitioned to when a task is completed, for
+    /// human review. Defaults to "In Review".
+    #[serde(default = "default_jira_review_status")]
+    pub review_status: String,
+    /// Priority names, highest priority first. An issue's priority is its
+    /// position in this list; issues with an unrecognized or absent
+    /// priority sort last.
+    #[serde(default = "default_jira_priority_order")]
+    pub priority_order: Vec<String>,
+}
+
+fn default_jira_todo_status() -> String {
+    "To Do".to_string()
+}
+
+fn default_jira_review_status() -> String {
+    "In Review".to_string()
+}
+
+fn default_jira_priority_order() -> Vec<String> {
+    vec![
+        "Highest".to_string(),
+        "High".to_string(),
+        "Medium".to_string(),
+        "Low".to_string(),
+        "Lowest".to_string(),
     ]
 }
 
@@ -261,6 +307,66 @@ targets:
                 assert_eq!(github.priority_labels, vec!["P0", "P1", "P2"]);
             }
             _ => panic!("expected github source"),
+        }
+    }
+
+    #[test]
+    fn parses_jira_source_with_defaults() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: jira
+      base_url: "https://myorg.atlassian.net"
+      board_id: 7
+      email: "me@example.com"
+      api_token: "mytoken"
+    project:
+      path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        match &cfg.targets["main"].source {
+            SourceConfig::Jira(jira) => {
+                assert_eq!(jira.base_url, "https://myorg.atlassian.net");
+                assert_eq!(jira.board_id, 7);
+                assert_eq!(jira.email, "me@example.com");
+                assert_eq!(jira.api_token, "mytoken");
+                assert_eq!(jira.todo_status, "To Do");
+                assert_eq!(jira.review_status, "In Review");
+                assert_eq!(
+                    jira.priority_order,
+                    vec!["Highest", "High", "Medium", "Low", "Lowest"]
+                );
+            }
+            _ => panic!("expected jira source"),
+        }
+    }
+
+    #[test]
+    fn parses_jira_source_with_custom_statuses() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: jira
+      base_url: "https://myorg.atlassian.net"
+      board_id: 7
+      email: "me@example.com"
+      api_token: "mytoken"
+      todo_status: "Backlog"
+      review_status: "Needs QA"
+      priority_order: ["P0", "P1", "P2"]
+    project:
+      path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        match &cfg.targets["main"].source {
+            SourceConfig::Jira(jira) => {
+                assert_eq!(jira.todo_status, "Backlog");
+                assert_eq!(jira.review_status, "Needs QA");
+                assert_eq!(jira.priority_order, vec!["P0", "P1", "P2"]);
+            }
+            _ => panic!("expected jira source"),
         }
     }
 

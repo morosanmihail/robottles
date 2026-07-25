@@ -1,0 +1,25 @@
+services:
+  robottles:
+    build: .
+    image: robottles:latest
+    restart: unless-stopped
+    # config.yaml must set `execution.mode: loop` (see config.yaml.example)
+    # for the container to keep picking up tasks instead of exiting after one.
+    command: ["/app/config.yaml"]
+    environment:
+      # Auth for the `claude` CLI agent. Set one of these in a .env file
+      # next to this compose file, or export it in the shell before `up`.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      # Config file, read-only — edit it on the host, restart to pick up changes.
+      - ./config.yaml:/app/config.yaml:ro
+      # Persist `claude` CLI login/session state across container restarts.
+      - claude-config:/root/.claude
+      # Target project checkouts. Every `project.path` in config.yaml must
+      # point somewhere under /projects (e.g. /projects/myrepo) so it
+      # resolves inside the container.
+      - ./projects:/projects
+
+volumes:
+  claude-config:

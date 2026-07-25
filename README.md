@@ -77,3 +77,21 @@ cargo install --git https://github.com/morosanmihail/robottles.git
 
 This installs the `robottles` binary to `~/.cargo/bin` (make sure that's on your `PATH`).
 
+### Running in Docker or Docker Compose
+
+A `Dockerfile` and `docker-compose.yml` are provided for running robottles in loop mode as a long-lived container. The image bundles the `claude` CLI (the default agent), so it's ready to go out of the box.
+
+```
+git clone https://github.com/morosanmihail/robottles.git
+cd robottles
+```
+
+Set up `config.yaml` with `execution.mode: loop` (see `config.yaml.example`), and make sure every `project.path` points somewhere under `/projects` (e.g. `/projects/myrepo`) — that's where `docker-compose.yml` mounts a `./projects` host folder into the container. Then:
+
+```
+docker compose up -d --build
+```
+
+`config.yaml` is bind-mounted read-only into the container (`./config.yaml:/app/config.yaml:ro`), so it's edited on the host — restart the container to pick up changes. The `claude` CLI's login/session state is kept in a named volume (`claude-config`) so it survives restarts; alternatively, set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in a `.env` file next to `docker-compose.yml`.
+
+

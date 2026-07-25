@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use anyhow::{bail, Context};
 
 use auto_worker::config::Config;
-use auto_worker::git::{cleanup_unused_branch, commit_changes, prepare_branch, working_tree_dirty};
+use auto_worker::git::{
+    cleanup_unused_branch, commit_changes, prepare_branch, sync_default_branch,
+    working_tree_dirty,
+};
 use auto_worker::task_source::ical::Task;
 
 fn main() -> anyhow::Result<()> {
@@ -38,6 +41,9 @@ fn main() -> anyhow::Result<()> {
             project.path.display()
         );
     }
+
+    sync_default_branch(&project.path)
+        .with_context(|| format!("syncing default branch in {}", project.path.display()))?;
 
     let branch = derive_branch_name(task);
     prepare_branch(&project.path, &branch)

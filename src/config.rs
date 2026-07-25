@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::agent::AgentRunner;
 use crate::caldav::CaldavTaskSource;
+use crate::claude::ClaudeRunner;
 use crate::dummy::DummyTaskSource;
+use crate::noop::NoopRunner;
 use crate::task_source::TaskSource;
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +33,25 @@ impl SourceConfig {
     }
 }
 
+/// Which agent runner to use to carry out a task's prompt against the
+/// project checkout.
+#[derive(Debug, Default, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum RunnerConfig {
+    #[default]
+    Claude,
+    Noop,
+}
+
+impl RunnerConfig {
+    pub fn build(&self) -> Box<dyn AgentRunner> {
+        match self {
+            RunnerConfig::Claude => Box::new(ClaudeRunner),
+            RunnerConfig::Noop => Box::new(NoopRunner),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CaldavConfig {
     /// Full URL of the CalDAV task-list (VTODO) collection.
@@ -46,6 +68,9 @@ pub struct ProjectConfig {
     /// finishes a task. Defaults to `true`.
     #[serde(default = "default_true")]
     pub commit_changes: bool,
+    /// Which agent runner carries out the task. Defaults to `claude`.
+    #[serde(default)]
+    pub agent: RunnerConfig,
 }
 
 fn default_true() -> bool {
@@ -123,5 +148,31 @@ project:
 "#;
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         assert!(!cfg.project.commit_changes);
+    }
+
+    #[test]
+    fn agent_defaults_to_claude() {
+        let yaml = r#"
+source:
+  type: dummy
+project:
+  path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(cfg.project.agent, RunnerConfig::Claude));
+    }
+
+    #[test]
+    fn agent_can_be_set_to_noop() {
+        let yaml = r#"
+source:
+  type: dummy
+project:
+  path: "/tmp/project"
+  agent:
+    type: noop
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(matches!(cfg.project.agent, RunnerConfig::Noop));
     }
 }

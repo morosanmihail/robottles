@@ -247,7 +247,7 @@ mod tests {
     /// commit on `main`, ready for `prepare_branch`/`commit_changes` tests.
     fn init_repo_with_origin() -> (tempfile::TempDir, tempfile::TempDir) {
         let origin = tempfile::tempdir().unwrap();
-        git(origin.path(), &["init", "--bare", "-q"]);
+        git(origin.path(), &["init", "--bare", "-q", "-b", "main"]);
 
         let work = tempfile::tempdir().unwrap();
         git(work.path(), &["init", "-q"]);

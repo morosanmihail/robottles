@@ -2,6 +2,7 @@ pub mod caldav;
 pub mod dummy;
 pub mod github;
 pub mod ical;
+pub mod jira;
 
 use ical::Task;
 

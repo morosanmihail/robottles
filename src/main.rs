@@ -7,14 +7,19 @@ use auto_worker::git::{cleanup_unused_branch, commit_changes, prepare_branch, wo
 use auto_worker::task_source::ical::Task;
 
 fn main() -> anyhow::Result<()> {
-    let config_path = std::env::args()
-        .nth(1)
+    let mut args = std::env::args().skip(1);
+    let config_path = args
+        .next()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("config.yaml"));
+    let target_name = args.next();
 
     let cfg = Config::load(&config_path)?;
-    let project = cfg.project;
-    let source = cfg.source.build();
+    let target = cfg
+        .into_target(target_name.as_deref())
+        .context("selecting target to run against")?;
+    let project = target.project;
+    let source = target.source.build();
 
     println!("Fetching next task");
     let Some(task) = source.get_next_task()? else {

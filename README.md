@@ -18,3 +18,13 @@ Well, not maybe, surely.
 Task suppliers are pluggable behind a `TaskSource` trait (`get_next_task`/`mark_completed`), configured via the `source.type` key in `config.yaml`. CalDAV is one implementer; there's also a `dummy` source (always hands back a single "make no changes" task) useful for trying things out.
 Contributing a new supplier is just adding another `TaskSource` implementer.
 
+## Multiple targets
+
+`config.yaml` can define several named `targets`, each with its own task source, agent and project folder. Pick which one to run against by name on the command line:
+
+```
+robottles config.yaml project2
+```
+
+A single run only ever works on one task in one target's project folder, even if several targets are configured. If the config only has one target, the name can be omitted. See `config.yaml.example` for the full format.
+

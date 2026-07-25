@@ -1,22 +1,34 @@
-source:
-  # Which task supplier to use. Currently supported: "caldav", "dummy".
-  type: caldav
-  # Full URL to the CalDAV task-list (VTODO) collection.
-  url: "https://example.com/remote.php/dav/calendars/myuser/tasks/"
-  username: "myuser"
-  # App password / token used as the basic-auth password.
-  token: "my-app-token"
-
-# To try things out without a real task supplier, use the dummy source
-# instead (it always hands back a single "make no changes" task):
+# Each entry under `targets` is an independent combination of task source,
+# agent and project folder. A single run of robottles picks exactly one
+# target by name, e.g.:
 #
-# source:
-#   type: dummy
+#   robottles config.yaml project2
+#
+# If only one target is configured, the name can be omitted.
+targets:
+  project1:
+    source:
+      # Which task supplier to use. Currently supported: "caldav", "dummy".
+      type: caldav
+      # Full URL to the CalDAV task-list (VTODO) collection.
+      url: "https://example.com/remote.php/dav/calendars/myuser/tasks/"
+      username: "myuser"
+      # App password / token used as the basic-auth password.
+      token: "my-app-token"
 
-project:
-  # Local folder Claude should work in when solving the picked task.
-  path: "/home/myuser/projects/my-project"
-  # Whether to commit and push Claude's changes to git after each task.
-  # Defaults to true; set to false to leave changes uncommitted in the
-  # working tree instead.
-  commit_changes: true
+    project:
+      # Local folder Claude should work in when solving the picked task.
+      path: "/home/myuser/projects/project1"
+      # Whether to commit and push Claude's changes to git after each task.
+      # Defaults to true; set to false to leave changes uncommitted in the
+      # working tree instead.
+      commit_changes: true
+
+  project2:
+    # To try things out without a real task supplier, use the dummy source
+    # instead (it always hands back a single "make no changes" task):
+    source:
+      type: dummy
+
+    project:
+      path: "/home/myuser/projects/project2"

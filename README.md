@@ -18,7 +18,9 @@ Good, that means you read its output.
 Now go fix it. 
 Preferably manually, but I can't tell you what to do, you're not an LLM. Yet.
 
-Agents are pluggable too, behind an `AgentRunner` trait, configured via the `project.agent` key.
+Doesn't have to be a CalDAV task. Or Claude.
+
+Agents are pluggable, behind an `AgentRunner` trait, configured via the `project.agent` key.
 Besides `claude` (the default) and `noop` (does nothing, for dry runs), there's `lmstudio`, which drives a local [LM Studio](https://lmstudio.ai/) server instead: it talks to LM Studio's OpenAI-compatible `/chat/completions` endpoint and gives the model tool-calling access to read/write files and run shell commands in the project checkout, looping until the model replies without any further tool calls.
 See `config.yaml.example` for its settings (`base_url`, `model`, `max_iterations`, `timeout_secs`).
 
@@ -29,7 +31,7 @@ We have:
 - GitHub issues
 - Dummy noop
 
-Contributing a new supplier is just adding another `TaskSource` implementer.
+Contribute new suppliers to your heart's content! 
 
 ## Multiple targets
 

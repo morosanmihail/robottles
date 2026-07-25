@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Context};
 
 use auto_worker::config::Config;
-use auto_worker::git::{commit_changes, prepare_branch};
+use auto_worker::git::{cleanup_unused_branch, commit_changes, prepare_branch, working_tree_dirty};
 use auto_worker::ical::Task;
 
 fn main() -> anyhow::Result<()> {
@@ -42,12 +42,19 @@ fn main() -> anyhow::Result<()> {
     let runner = project.agent.build();
     runner.run(&project.path, &prompt)?;
 
-    if project.commit_changes {
-        commit_changes(&project.path, &branch, task).with_context(|| {
-            format!("committing task {} changes to branch {branch}", task.uid)
-        })?;
+    if working_tree_dirty(&project.path)? {
+        if project.commit_changes {
+            commit_changes(&project.path, &branch, task).with_context(|| {
+                format!("committing task {} changes to branch {branch}", task.uid)
+            })?;
+        } else {
+            println!("Skipping git commit (commit_changes is disabled in config).");
+        }
     } else {
-        println!("Skipping git commit (commit_changes is disabled in config).");
+        println!("Agent made no changes; cleaning up branch {branch}.");
+        cleanup_unused_branch(&project.path, &branch).with_context(|| {
+            format!("cleaning up unused branch {branch} for task {}", task.uid)
+        })?;
     }
 
     println!("Marking task [{}] as completed", task.uid);

@@ -102,6 +102,48 @@ pub fn current_branch(project_dir: &Path) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Determine the repository's main branch: the remote `origin/HEAD` target
+/// branch if one is configured, otherwise the first of `main`, `master`,
+/// `develop` that exists locally.
+pub fn default_branch(project_dir: &Path) -> anyhow::Result<String> {
+    let symbolic_ref = Command::new("git")
+        .current_dir(project_dir)
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .output()
+        .context("running `git symbolic-ref refs/remotes/origin/HEAD`")?;
+    if symbolic_ref.status.success() {
+        let reference = String::from_utf8_lossy(&symbolic_ref.stdout)
+            .trim()
+            .to_string();
+        if let Some(name) = reference.strip_prefix("refs/remotes/origin/") {
+            return Ok(name.to_string());
+        }
+    }
+
+    for candidate in ["main", "master", "develop"] {
+        if branch_exists(project_dir, candidate)? {
+            return Ok(candidate.to_string());
+        }
+    }
+
+    bail!("could not determine default branch (no origin/HEAD and none of main/master/develop exist)")
+}
+
+/// If the agent made no changes on the task branch, discard it: switch back
+/// to the repo's default branch and delete the now-unused task branch.
+pub fn cleanup_unused_branch(project_dir: &Path, branch: &str) -> anyhow::Result<()> {
+    let default = default_branch(project_dir)?;
+    if default == branch {
+        return Ok(());
+    }
+
+    run_git(project_dir, &["checkout", &default])?;
+    run_git(project_dir, &["branch", "-D", branch])?;
+    println!("No changes made; deleted branch {branch} and switched back to {default}.");
+
+    Ok(())
+}
+
 pub fn branch_exists(project_dir: &Path, branch: &str) -> anyhow::Result<bool> {
     let status = Command::new("git")
         .current_dir(project_dir)
@@ -262,6 +304,24 @@ mod tests {
             !remote_branches.stdout.is_empty(),
             "expected task_branch to have been pushed to origin"
         );
+    }
+
+    #[test]
+    fn default_branch_falls_back_to_local_main() {
+        let (_origin, work) = init_repo_with_origin();
+        assert_eq!(default_branch(work.path()).unwrap(), "main");
+    }
+
+    #[test]
+    fn cleanup_unused_branch_deletes_branch_and_returns_to_default() {
+        let (_origin, work) = init_repo_with_origin();
+        prepare_branch(work.path(), "task_branch").unwrap();
+        assert!(!working_tree_dirty(work.path()).unwrap());
+
+        cleanup_unused_branch(work.path(), "task_branch").unwrap();
+
+        assert_eq!(current_branch(work.path()).unwrap(), "main");
+        assert!(!branch_exists(work.path(), "task_branch").unwrap());
     }
 
     #[test]

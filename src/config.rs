@@ -81,6 +81,11 @@ pub struct LmstudioConfig {
     /// Maximum number of tool-calling round trips before giving up.
     #[serde(default = "default_lmstudio_max_iterations")]
     pub max_iterations: u32,
+    /// How long to wait for each LM Studio chat-completion request before
+    /// giving up, in seconds. Local models can take a long time to finish
+    /// thinking, so this defaults high.
+    #[serde(default = "default_lmstudio_timeout_secs")]
+    pub timeout_secs: u64,
 }
 
 fn default_lmstudio_base_url() -> String {
@@ -89,6 +94,10 @@ fn default_lmstudio_base_url() -> String {
 
 fn default_lmstudio_max_iterations() -> u32 {
     20
+}
+
+fn default_lmstudio_timeout_secs() -> u64 {
+    1800
 }
 
 #[derive(Debug, Deserialize)]
@@ -352,6 +361,7 @@ targets:
                 assert_eq!(lmstudio.base_url, "http://localhost:1234/v1");
                 assert_eq!(lmstudio.model, None);
                 assert_eq!(lmstudio.max_iterations, 20);
+                assert_eq!(lmstudio.timeout_secs, 1800);
             }
             _ => panic!("expected lmstudio agent"),
         }
@@ -371,6 +381,7 @@ targets:
         base_url: "http://192.168.1.50:1234/v1"
         model: "qwen2.5-coder-32b"
         max_iterations: 5
+        timeout_secs: 60
 "#;
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         match &cfg.targets["main"].project.agent {
@@ -378,6 +389,7 @@ targets:
                 assert_eq!(lmstudio.base_url, "http://192.168.1.50:1234/v1");
                 assert_eq!(lmstudio.model.as_deref(), Some("qwen2.5-coder-32b"));
                 assert_eq!(lmstudio.max_iterations, 5);
+                assert_eq!(lmstudio.timeout_secs, 60);
             }
             _ => panic!("expected lmstudio agent"),
         }

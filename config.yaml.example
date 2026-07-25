@@ -45,3 +45,7 @@ targets:
         # Maximum number of tool-calling round trips before giving up.
         # Defaults to 20.
         max_iterations: 20
+        # How long to wait for each chat-completion request before giving
+        # up, in seconds. Local models can take a long time to think, so
+        # this defaults to 1800 (30 minutes).
+        timeout_secs: 1800

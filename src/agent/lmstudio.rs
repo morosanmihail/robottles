@@ -36,7 +36,10 @@ impl AgentRunner for LmstudioRunner {
             project_dir.display()
         );
 
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
+            .build()
+            .context("building HTTP client for LM Studio")?;
         let mut messages = vec![
             json!({"role": "system", "content": SYSTEM_PROMPT}),
             json!({"role": "user", "content": prompt}),

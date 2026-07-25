@@ -38,11 +38,14 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
+    let branch = derive_branch_name(task);
+    prepare_branch(&cfg.project.path, &branch)
+        .with_context(|| format!("preparing branch {branch} for task {}", task.uid))?;
+
     let prompt = build_prompt(task);
     run_claude(&cfg.project.path, &prompt)?;
 
-    let branch = derive_branch_name(task);
-    commit_to_branch(&cfg.project.path, &branch, task)
+    commit_changes(&cfg.project.path, &branch, task)
         .with_context(|| format!("committing task {} changes to branch {branch}", task.uid))?;
 
     println!("Marking task [{}] as completed in CalDAV", task.uid);
@@ -162,10 +165,25 @@ fn sanitize_branch_component(s: &str) -> String {
     result
 }
 
-/// After Claude has made its changes, commit them on a dedicated branch
-/// (never on `main`/`master`) and push that branch to `origin`. Skips the
-/// commit if there's nothing to commit.
-fn commit_to_branch(project_dir: &std::path::Path, branch: &str, task: &Task) -> anyhow::Result<()> {
+/// Before Claude starts working, stash any pre-existing changes out of the
+/// way (so Claude's diff — and the eventual commit — only reflects its own
+/// work) and switch to the dedicated per-task branch (never `main`/`master`),
+/// creating it from the current HEAD if it doesn't exist yet.
+fn prepare_branch(project_dir: &std::path::Path, branch: &str) -> anyhow::Result<()> {
+    if working_tree_dirty(project_dir)? {
+        run_git(
+            project_dir,
+            &[
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                &format!("auto-worker: stashed before task branch {branch}"),
+            ],
+        )?;
+        println!("Stashed pre-existing changes before starting task.");
+    }
+
     let current = current_branch(project_dir)?;
     if current == branch {
         // Already on the target branch (e.g. re-run for the same task).
@@ -175,15 +193,14 @@ fn commit_to_branch(project_dir: &std::path::Path, branch: &str, task: &Task) ->
         run_git(project_dir, &["checkout", "-b", branch])?;
     }
 
-    let status = Command::new("git")
-        .current_dir(project_dir)
-        .args(["status", "--porcelain"])
-        .output()
-        .context("running `git status --porcelain`")?;
-    if !status.status.success() {
-        bail!("`git status --porcelain` failed");
-    }
-    if status.stdout.is_empty() {
+    Ok(())
+}
+
+/// After Claude has made its changes, commit them (explicitly staging any
+/// new, previously-untracked files) on the current branch and push it to
+/// `origin`. Skips the commit if there's nothing to commit.
+fn commit_changes(project_dir: &std::path::Path, branch: &str, task: &Task) -> anyhow::Result<()> {
+    if !working_tree_dirty(project_dir)? {
         println!("No changes to commit on branch {branch}.");
         return Ok(());
     }
@@ -197,6 +214,20 @@ fn commit_to_branch(project_dir: &std::path::Path, branch: &str, task: &Task) ->
     println!("Pushed branch {branch} to origin.");
 
     Ok(())
+}
+
+/// True if `git status --porcelain` reports any staged, unstaged, or
+/// untracked changes.
+fn working_tree_dirty(project_dir: &std::path::Path) -> anyhow::Result<bool> {
+    let status = Command::new("git")
+        .current_dir(project_dir)
+        .args(["status", "--porcelain"])
+        .output()
+        .context("running `git status --porcelain`")?;
+    if !status.status.success() {
+        bail!("`git status --porcelain` failed");
+    }
+    Ok(!status.stdout.is_empty())
 }
 
 fn current_branch(project_dir: &std::path::Path) -> anyhow::Result<String> {
@@ -278,5 +309,147 @@ mod tests {
     fn branch_name_defaults_to_task_when_everything_empty() {
         let task = task_with("", "", None);
         assert_eq!(derive_branch_name(&task), "task");
+    }
+
+    /// Run a git command, panicking on failure. Only for test setup, where a
+    /// failure means the test fixture itself is broken.
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .status()
+            .unwrap_or_else(|e| panic!("running `git {}`: {e}", args.join(" ")));
+        assert!(status.success(), "`git {}` failed", args.join(" "));
+    }
+
+    /// Set up a work tree with an `origin` remote (a local bare repo) and one
+    /// commit on `main`, ready for `prepare_branch`/`commit_changes` tests.
+    fn init_repo_with_origin() -> (tempfile::TempDir, tempfile::TempDir) {
+        let origin = tempfile::tempdir().unwrap();
+        git(origin.path(), &["init", "--bare", "-q"]);
+
+        let work = tempfile::tempdir().unwrap();
+        git(work.path(), &["init", "-q"]);
+        git(work.path(), &["config", "user.email", "test@example.com"]);
+        git(work.path(), &["config", "user.name", "Test User"]);
+        std::fs::write(work.path().join("README.md"), "hello\n").unwrap();
+        git(work.path(), &["add", "-A"]);
+        git(work.path(), &["commit", "-q", "-m", "initial commit"]);
+        git(work.path(), &["branch", "-M", "main"]);
+        git(
+            work.path(),
+            &["remote", "add", "origin", origin.path().to_str().unwrap()],
+        );
+        git(work.path(), &["push", "-q", "-u", "origin", "main"]);
+
+        (origin, work)
+    }
+
+    #[test]
+    fn prepare_branch_stashes_dirty_changes_and_creates_branch() {
+        let (_origin, work) = init_repo_with_origin();
+
+        // Dirty the work tree: modify a tracked file and add an untracked one.
+        std::fs::write(work.path().join("README.md"), "changed\n").unwrap();
+        std::fs::write(work.path().join("untracked.txt"), "scratch\n").unwrap();
+        assert!(working_tree_dirty(work.path()).unwrap());
+
+        prepare_branch(work.path(), "task_branch").unwrap();
+
+        assert_eq!(current_branch(work.path()).unwrap(), "task_branch");
+        assert!(
+            !working_tree_dirty(work.path()).unwrap(),
+            "pre-existing changes should have been stashed"
+        );
+        assert!(!work.path().join("untracked.txt").exists());
+
+        let stash_list = Command::new("git")
+            .current_dir(work.path())
+            .args(["stash", "list"])
+            .output()
+            .unwrap();
+        assert!(!stash_list.stdout.is_empty(), "expected a stash entry");
+    }
+
+    #[test]
+    fn prepare_branch_is_noop_on_clean_tree() {
+        let (_origin, work) = init_repo_with_origin();
+
+        prepare_branch(work.path(), "task_branch").unwrap();
+
+        assert_eq!(current_branch(work.path()).unwrap(), "task_branch");
+        assert!(!working_tree_dirty(work.path()).unwrap());
+        let stash_list = Command::new("git")
+            .current_dir(work.path())
+            .args(["stash", "list"])
+            .output()
+            .unwrap();
+        assert!(stash_list.stdout.is_empty(), "expected no stash entry");
+    }
+
+    #[test]
+    fn commit_changes_adds_untracked_files_commits_and_pushes() {
+        let (origin, work) = init_repo_with_origin();
+        prepare_branch(work.path(), "task_branch").unwrap();
+
+        // Simulate Claude producing both a modified tracked file and a new,
+        // previously-untracked one.
+        std::fs::write(work.path().join("README.md"), "updated by claude\n").unwrap();
+        std::fs::write(work.path().join("new_file.txt"), "brand new\n").unwrap();
+
+        let task = task_with("task-uid", "Add a new feature", None);
+        commit_changes(work.path(), "task_branch", &task).unwrap();
+
+        assert!(!working_tree_dirty(work.path()).unwrap());
+
+        let log = Command::new("git")
+            .current_dir(work.path())
+            .args(["log", "-1", "--pretty=%s"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&log.stdout).trim(),
+            "Complete task: Add a new feature"
+        );
+
+        let ls_files = Command::new("git")
+            .current_dir(work.path())
+            .args(["ls-files"])
+            .output()
+            .unwrap();
+        let tracked = String::from_utf8_lossy(&ls_files.stdout);
+        assert!(tracked.contains("new_file.txt"));
+
+        let remote_branches = Command::new("git")
+            .current_dir(origin.path())
+            .args(["branch", "--list", "task_branch"])
+            .output()
+            .unwrap();
+        assert!(
+            !remote_branches.stdout.is_empty(),
+            "expected task_branch to have been pushed to origin"
+        );
+    }
+
+    #[test]
+    fn commit_changes_skips_commit_when_nothing_changed() {
+        let (_origin, work) = init_repo_with_origin();
+        prepare_branch(work.path(), "task_branch").unwrap();
+
+        let before = Command::new("git")
+            .current_dir(work.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+
+        let task = task_with("task-uid", "Nothing to do", None);
+        commit_changes(work.path(), "task_branch", &task).unwrap();
+
+        let after = Command::new("git")
+            .current_dir(work.path())
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(before.stdout, after.stdout, "HEAD should not have moved");
     }
 }

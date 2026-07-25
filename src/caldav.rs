@@ -4,6 +4,7 @@ use quick_xml::reader::Reader;
 
 use crate::config::CaldavConfig;
 use crate::ical::{self, Task};
+use crate::task_source::TaskSource;
 
 const REPORT_BODY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
@@ -18,9 +19,55 @@ const REPORT_BODY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
   </c:filter>
 </c:calendar-query>"#;
 
+/// A task source backed by a CalDAV task-list (VTODO) collection.
+pub struct CaldavTaskSource {
+    pub config: CaldavConfig,
+}
+
+impl CaldavTaskSource {
+    pub fn new(config: CaldavConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl TaskSource for CaldavTaskSource {
+    /// Fetch every open task, and return the most important one: lower
+    /// PRIORITY number wins (RFC 5545: 1 = highest, 9 = lowest, 0/absent =
+    /// unspecified and sorts last among prioritized tasks), then earliest
+    /// DUE date, then summary as a tiebreaker.
+    fn get_next_task(&self) -> anyhow::Result<Option<Task>> {
+        let mut tasks = fetch_open_tasks(&self.config)?;
+        sort_by_priority(&mut tasks);
+        Ok(if tasks.is_empty() {
+            None
+        } else {
+            Some(tasks.remove(0))
+        })
+    }
+
+    fn mark_completed(&self, task: &Task) -> anyhow::Result<()> {
+        mark_completed(&self.config, task)
+    }
+}
+
+/// Order tasks "most important first"; see [`CaldavTaskSource::get_next_task`].
+fn sort_by_priority(tasks: &mut [Task]) {
+    tasks.sort_by(|a, b| {
+        let pa = a.priority.filter(|&p| p > 0).unwrap_or(u32::MAX);
+        let pb = b.priority.filter(|&p| p > 0).unwrap_or(u32::MAX);
+        pa.cmp(&pb)
+            .then_with(|| {
+                let da = a.due.as_deref().unwrap_or("9999999999999");
+                let db = b.due.as_deref().unwrap_or("9999999999999");
+                da.cmp(db)
+            })
+            .then_with(|| a.summary.cmp(&b.summary))
+    });
+}
+
 /// Fetch every open (not completed/cancelled) VTODO from the configured
 /// CalDAV task-list collection.
-pub fn fetch_open_tasks(cfg: &CaldavConfig) -> anyhow::Result<Vec<Task>> {
+fn fetch_open_tasks(cfg: &CaldavConfig) -> anyhow::Result<Vec<Task>> {
     let blocks = report_calendar_data(cfg)?;
 
     let tasks = blocks
@@ -39,7 +86,7 @@ pub fn fetch_open_tasks(cfg: &CaldavConfig) -> anyhow::Result<Vec<Task>> {
 
 /// Mark `task`'s VTODO as completed on the CalDAV server: fetch the current
 /// resource, flip STATUS/COMPLETED/PERCENT-COMPLETE, and PUT it back.
-pub fn mark_completed(cfg: &CaldavConfig, task: &Task) -> anyhow::Result<()> {
+fn mark_completed(cfg: &CaldavConfig, task: &Task) -> anyhow::Result<()> {
     let base = reqwest::Url::parse(&cfg.url).context("parsing configured CalDAV url")?;
     let resource_url = base
         .join(&task.href)
@@ -172,4 +219,45 @@ fn extract_calendar_data(xml: &str) -> anyhow::Result<Vec<ResourceBlock>> {
     }
 
     Ok(blocks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task_with(uid: &str, summary: &str, priority: Option<u32>, due: Option<&str>) -> Task {
+        Task {
+            uid: uid.to_string(),
+            summary: summary.to_string(),
+            status: None,
+            priority,
+            due: due.map(str::to_string),
+            description: None,
+            href: String::new(),
+        }
+    }
+
+    #[test]
+    fn sort_by_priority_orders_by_priority_then_due_then_summary() {
+        let mut tasks = vec![
+            task_with("a", "Zebra", Some(5), None),
+            task_with("b", "Apple", None, None),
+            task_with("c", "Urgent", Some(1), Some("20260801T000000Z")),
+            task_with("d", "Also urgent", Some(1), Some("20260701T000000Z")),
+        ];
+        sort_by_priority(&mut tasks);
+        let order: Vec<&str> = tasks.iter().map(|t| t.uid.as_str()).collect();
+        assert_eq!(order, vec!["d", "c", "a", "b"]);
+    }
+
+    #[test]
+    fn sort_by_priority_treats_zero_priority_as_unspecified() {
+        let mut tasks = vec![
+            task_with("a", "Has priority", Some(3), None),
+            task_with("b", "Zero priority", Some(0), None),
+        ];
+        sort_by_priority(&mut tasks);
+        let order: Vec<&str> = tasks.iter().map(|t| t.uid.as_str()).collect();
+        assert_eq!(order, vec!["a", "b"]);
+    }
 }

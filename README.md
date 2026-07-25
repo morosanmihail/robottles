@@ -15,7 +15,6 @@ Have it running on a schedule, have it run whenever you have spare compute or to
 Maybe I'll extend it to support local LLMs. 
 Well, not maybe, surely. 
 
-Maybe I'll extend it to support non-CalDAV calendars.
-Less certain of that one, but I will reorganise the code manually to allow for configurable task lists, to make it easier for people to contribute their own preferred ones.
-Or, let's be honest, have an LLM add support for their favourite. 
+Task suppliers are pluggable behind a `TaskSource` trait (`get_next_task`/`mark_completed`), configured via the `source.type` key in `config.yaml`. CalDAV is one implementer; there's also a `dummy` source (always hands back a single "make no changes" task) useful for trying things out.
+Contributing a new supplier is just adding another `TaskSource` implementer.
 

@@ -1,9 +1,17 @@
-caldav:
+source:
+  # Which task supplier to use. Currently supported: "caldav", "dummy".
+  type: caldav
   # Full URL to the CalDAV task-list (VTODO) collection.
   url: "https://example.com/remote.php/dav/calendars/myuser/tasks/"
   username: "myuser"
   # App password / token used as the basic-auth password.
   token: "my-app-token"
+
+# To try things out without a real task supplier, use the dummy source
+# instead (it always hands back a single "make no changes" task):
+#
+# source:
+#   type: dummy
 
 project:
   # Local folder Claude should work in when solving the picked task.

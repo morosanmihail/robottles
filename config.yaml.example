@@ -16,3 +16,7 @@ source:
 project:
   # Local folder Claude should work in when solving the picked task.
   path: "/home/myuser/projects/my-project"
+  # Whether to commit and push Claude's changes to git after each task.
+  # Defaults to true; set to false to leave changes uncommitted in the
+  # working tree instead.
+  commit_changes: true

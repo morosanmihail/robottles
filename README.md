@@ -12,8 +12,8 @@ Connect it to a CalDAV calendar, with tasks, and it will pick up the highest pri
 
 That's pretty much it. 
 Have it running on a schedule, have it run whenever you have spare compute or tokens or whatever.
-Maybe I'll extend it to support local LLMs. 
-Well, not maybe, surely. 
+
+Agents are pluggable too, behind an `AgentRunner` trait, configured via the `project.agent` key. Besides `claude` (the default) and `noop` (does nothing, for dry runs), there's `lmstudio`, which drives a local [LM Studio](https://lmstudio.ai/) server instead: it talks to LM Studio's OpenAI-compatible `/chat/completions` endpoint and gives the model tool-calling access to read/write files and run shell commands in the project checkout, looping until the model replies without any further tool calls. See `config.yaml.example` for its settings (`base_url`, `model`, `max_iterations`).
 
 Task suppliers are pluggable behind a `TaskSource` trait (`get_next_task`/`mark_completed`), configured via the `source.type` key in `config.yaml`. CalDAV is one implementer; there's also a `dummy` source (always hands back a single "make no changes" task) useful for trying things out.
 Contributing a new supplier is just adding another `TaskSource` implementer.

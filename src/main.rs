@@ -1,10 +1,9 @@
 use std::path::PathBuf;
-use std::process::Command;
 
 use anyhow::{bail, Context};
 
 use auto_worker::config::Config;
-use auto_worker::git::{commit_changes, prepare_branch, print_git_status};
+use auto_worker::git::{commit_changes, prepare_branch};
 use auto_worker::ical::Task;
 
 fn main() -> anyhow::Result<()> {
@@ -40,7 +39,8 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("preparing branch {branch} for task {}", task.uid))?;
 
     let prompt = build_prompt(task);
-    run_claude(&project.path, &prompt)?;
+    let runner = project.agent.build();
+    runner.run(&project.path, &prompt)?;
 
     if project.commit_changes {
         commit_changes(&project.path, &branch, task).with_context(|| {
@@ -67,26 +67,6 @@ fn build_prompt(task: &Task) -> String {
     }
     prompt.push_str("\nWork in this project directory to accomplish the task above. Any instructions in the task are about the files and codebase in this directory. If new features are requested, make sure to add sensible tests.");
     prompt
-}
-
-fn run_claude(project_dir: &std::path::Path, prompt: &str) -> anyhow::Result<()> {
-    println!("Starting Claude session in {}", project_dir.display());
-
-    let status = Command::new("claude")
-        .current_dir(project_dir)
-        .arg("--print")
-        .arg("--dangerously-skip-permissions")
-        .arg(prompt)
-        .status()
-        .context("launching `claude` — is the Claude Code CLI installed and on PATH?")?;
-
-    if !status.success() {
-        bail!("claude exited with status {status}");
-    }
-
-    print_git_status(project_dir);
-
-    Ok(())
 }
 
 /// Derive a git branch name from a task: prefer a sanitized version of the

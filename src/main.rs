@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context};
 
-use auto_worker::config::Config;
-use auto_worker::git::{
+use robottles::config::Config;
+use robottles::git::{
     cleanup_unused_branch, commit_changes, prepare_branch, sync_default_branch,
     working_tree_dirty,
 };
-use auto_worker::task_source::ical::Task;
+use robottles::task_source::ical::Task;
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);

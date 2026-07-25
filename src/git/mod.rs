@@ -22,11 +22,9 @@ pub fn print_git_status(project_dir: &Path) {
     }
 }
 
-/// Before Claude starts working, stash any pre-existing changes out of the
-/// way (so Claude's diff — and the eventual commit — only reflects its own
-/// work) and switch to the dedicated per-task branch (never `main`/`master`),
-/// creating it from the current HEAD if it doesn't exist yet.
-pub fn prepare_branch(project_dir: &Path, branch: &str) -> anyhow::Result<()> {
+/// Stash any pre-existing changes out of the way (so Claude's diff — and the
+/// eventual commit — only reflects its own work) if the tree is dirty.
+fn stash_if_dirty(project_dir: &Path, reason: &str) -> anyhow::Result<()> {
     if working_tree_dirty(project_dir)? {
         run_git(
             project_dir,
@@ -35,11 +33,59 @@ pub fn prepare_branch(project_dir: &Path, branch: &str) -> anyhow::Result<()> {
                 "push",
                 "--include-untracked",
                 "-m",
-                &format!("auto-worker: stashed before task branch {branch}"),
+                &format!("auto-worker: stashed before {reason}"),
             ],
         )?;
-        println!("Stashed pre-existing changes before starting task.");
+        println!("Stashed pre-existing changes before {reason}.");
     }
+    Ok(())
+}
+
+/// Before picking a task or starting an agent run, put the repo's default
+/// branch (`main`/`master`/`develop`, or whatever `origin/HEAD` points at) in
+/// a known-good state: check it out and pull any remote changes. Any
+/// pre-existing dirty changes are stashed out of the way first. Returns the
+/// name of the default branch.
+pub fn sync_default_branch(project_dir: &Path) -> anyhow::Result<String> {
+    let default = default_branch(project_dir)?;
+    stash_if_dirty(project_dir, "syncing default branch")?;
+
+    if current_branch(project_dir)? != default {
+        run_git(project_dir, &["checkout", &default])?;
+    }
+
+    if has_remote(project_dir, "origin")? {
+        run_git(project_dir, &["pull", "--ff-only", "origin", &default])?;
+        println!("Pulled latest changes for {default} from origin.");
+    }
+
+    Ok(default)
+}
+
+/// True if `project_dir` has a remote configured with the given name.
+fn has_remote(project_dir: &Path, name: &str) -> anyhow::Result<bool> {
+    let output = Command::new("git")
+        .current_dir(project_dir)
+        .args(["remote"])
+        .output()
+        .context("running `git remote`")?;
+    if !output.status.success() {
+        bail!(
+            "`git remote` failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| line == name))
+}
+
+/// Before Claude starts working, stash any pre-existing changes out of the
+/// way (so Claude's diff — and the eventual commit — only reflects its own
+/// work) and switch to the dedicated per-task branch (never `main`/`master`),
+/// creating it from the current HEAD if it doesn't exist yet.
+pub fn prepare_branch(project_dir: &Path, branch: &str) -> anyhow::Result<()> {
+    stash_if_dirty(project_dir, &format!("starting task branch {branch}"))?;
 
     let current = current_branch(project_dir)?;
     if current == branch {
@@ -322,6 +368,56 @@ mod tests {
 
         assert_eq!(current_branch(work.path()).unwrap(), "main");
         assert!(!branch_exists(work.path(), "task_branch").unwrap());
+    }
+
+    #[test]
+    fn sync_default_branch_checks_out_main_and_pulls_remote_changes() {
+        let (origin, work) = init_repo_with_origin();
+        prepare_branch(&work.path(), "task_branch").unwrap();
+        assert_eq!(current_branch(work.path()).unwrap(), "task_branch");
+
+        // Simulate a teammate pushing a new commit to origin/main while this
+        // clone was off on the task branch.
+        let other_clone = tempfile::tempdir().unwrap();
+        git(
+            other_clone.path(),
+            &["clone", "-q", origin.path().to_str().unwrap(), "."],
+        );
+        git(other_clone.path(), &["config", "user.email", "test@example.com"]);
+        git(other_clone.path(), &["config", "user.name", "Test User"]);
+        std::fs::write(other_clone.path().join("README.md"), "from teammate\n").unwrap();
+        git(other_clone.path(), &["commit", "-q", "-am", "teammate update"]);
+        git(other_clone.path(), &["push", "-q"]);
+
+        let default = sync_default_branch(work.path()).unwrap();
+
+        assert_eq!(default, "main");
+        assert_eq!(current_branch(work.path()).unwrap(), "main");
+        assert_eq!(
+            std::fs::read_to_string(work.path().join("README.md")).unwrap(),
+            "from teammate\n"
+        );
+    }
+
+    #[test]
+    fn sync_default_branch_stashes_dirty_changes_before_switching() {
+        let (_origin, work) = init_repo_with_origin();
+        prepare_branch(&work.path(), "task_branch").unwrap();
+
+        std::fs::write(work.path().join("README.md"), "dirty change\n").unwrap();
+        assert!(working_tree_dirty(work.path()).unwrap());
+
+        sync_default_branch(work.path()).unwrap();
+
+        assert_eq!(current_branch(work.path()).unwrap(), "main");
+        assert!(!working_tree_dirty(work.path()).unwrap());
+
+        let stash_list = Command::new("git")
+            .current_dir(work.path())
+            .args(["stash", "list"])
+            .output()
+            .unwrap();
+        assert!(!stash_list.stdout.is_empty(), "expected a stash entry");
     }
 
     #[test]

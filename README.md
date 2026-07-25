@@ -43,3 +43,27 @@ robottles config.yaml project2
 
 A single run only ever works on one task in one target's project folder, even if several targets are configured. If the config only has one target, the name can be omitted. See `config.yaml.example` for the full format.
 
+## Installation
+
+### Build from source
+
+Clone the repo and build with Cargo:
+
+```
+git clone https://github.com/morosanmihail/robottles.git
+cd robottles
+cargo build --release
+```
+
+The binary will be at `target/release/robottles`.
+
+### Install directly via `cargo install`
+
+No need to clone first, `cargo install` can pull straight from the GitHub repo:
+
+```
+cargo install --git https://github.com/morosanmihail/robottles.git
+```
+
+This installs the `robottles` binary to `~/.cargo/bin` (make sure that's on your `PATH`).
+

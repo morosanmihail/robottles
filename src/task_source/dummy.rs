@@ -1,5 +1,5 @@
-use crate::ical::Task;
-use crate::task_source::TaskSource;
+use super::ical::Task;
+use super::TaskSource;
 
 /// A no-op task source, mainly useful for testing/dry-running auto_worker
 /// without wiring up a real supplier: it always hands back a single task

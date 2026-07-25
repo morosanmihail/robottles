@@ -4,7 +4,7 @@ use anyhow::{bail, Context};
 
 use auto_worker::config::Config;
 use auto_worker::git::{cleanup_unused_branch, commit_changes, prepare_branch, working_tree_dirty};
-use auto_worker::ical::Task;
+use auto_worker::task_source::ical::Task;
 
 fn main() -> anyhow::Result<()> {
     let config_path = std::env::args()

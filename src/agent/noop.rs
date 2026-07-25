@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::agent::AgentRunner;
+use super::AgentRunner;
 
 /// An agent runner that does nothing, mainly useful for testing/dry-running
 /// auto_worker without invoking a real coding agent.

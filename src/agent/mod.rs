@@ -1,3 +1,6 @@
+pub mod claude;
+pub mod noop;
+
 use std::path::Path;
 
 /// Something that can carry out a task's prompt against a project checkout.

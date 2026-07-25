@@ -3,7 +3,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context};
 
-use crate::agent::AgentRunner;
+use super::AgentRunner;
 use crate::git::print_git_status;
 
 /// Runs a task's prompt through the `claude` CLI in `--print` mode against

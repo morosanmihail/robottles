@@ -1,4 +1,8 @@
-use crate::ical::Task;
+pub mod caldav;
+pub mod dummy;
+pub mod ical;
+
+use ical::Task;
 
 /// A supplier of tasks for auto_worker to work through. Each implementer
 /// owns its own configuration and knows how to pick the next task to work

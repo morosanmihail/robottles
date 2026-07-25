@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::Deserialize;
 
+use crate::agent::claude::ClaudeRunner;
+use crate::agent::noop::NoopRunner;
 use crate::agent::AgentRunner;
-use crate::caldav::CaldavTaskSource;
-use crate::claude::ClaudeRunner;
-use crate::dummy::DummyTaskSource;
-use crate::noop::NoopRunner;
+use crate::task_source::caldav::CaldavTaskSource;
+use crate::task_source::dummy::DummyTaskSource;
 use crate::task_source::TaskSource;
 
 #[derive(Debug, Deserialize)]

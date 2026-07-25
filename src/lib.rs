@@ -1,9 +1,4 @@
 pub mod agent;
-pub mod caldav;
-pub mod claude;
 pub mod config;
-pub mod dummy;
 pub mod git;
-pub mod ical;
-pub mod noop;
 pub mod task_source;

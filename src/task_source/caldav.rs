@@ -2,9 +2,9 @@ use anyhow::{bail, Context};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 
+use super::ical::{self, Task};
+use super::TaskSource;
 use crate::config::CaldavConfig;
-use crate::ical::{self, Task};
-use crate::task_source::TaskSource;
 
 const REPORT_BODY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">

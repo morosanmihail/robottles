@@ -3,7 +3,7 @@ use std::process::Command;
 
 use anyhow::{bail, Context};
 
-use crate::ical::Task;
+use crate::task_source::ical::Task;
 
 pub fn print_git_status(project_dir: &Path) {
     match Command::new("git")

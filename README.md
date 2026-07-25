@@ -43,6 +43,12 @@ robottles config.yaml project2
 
 A single run only ever works on one task in one target's project folder, even if several targets are configured. If the config only has one target, the name can be omitted. See `config.yaml.example` for the full format.
 
+## Disabling git
+
+By default robottles syncs the default branch, creates a per-task branch, and commits/pushes the agent's changes to git for every target. Set `project.git_enabled: false` for a target to skip all of that — useful for a project folder that isn't a git repository at all. `project.commit_changes` is ignored when `git_enabled` is false.
+
+If `git_enabled` is left at its default (`true`) but the configured `project.path` isn't actually a git repository, the target fails cleanly instead of running git commands against it: in one-shot mode robottles logs the error and exits with status 0; in loop mode it logs the error and moves on to the next iteration, same as any other per-iteration failure.
+
 ## Loop mode
 
 By default robottles does one task and exits. Set `execution.mode: loop` in `config.yaml` to instead have it run forever: each iteration picks a task for the next configured target (cycling round-robin through all of them), then sleeps `execution.delay_secs` (default 300, i.e. 5 minutes) before moving on. It keeps going until manually stopped (e.g. Ctrl-C). A failure on one iteration is logged and doesn't stop the loop.

@@ -30,8 +30,15 @@ targets:
       path: "/home/myuser/projects/project1"
       # Whether to commit and push Claude's changes to git after each task.
       # Defaults to true; set to false to leave changes uncommitted in the
-      # working tree instead.
+      # working tree instead. Ignored if git_enabled is false.
       commit_changes: true
+      # Whether to perform any git operations (default-branch sync, task
+      # branches, commits/pushes) against this project folder at all.
+      # Defaults to true. Set to false for a project folder that isn't a git
+      # repository. When true (the default) and the folder turns out not to
+      # be a git repository, the target fails cleanly instead of running git
+      # commands against it.
+      git_enabled: true
 
   project2:
     # To try things out without a real task supplier, use the dummy source

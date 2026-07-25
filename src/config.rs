@@ -5,6 +5,7 @@ use anyhow::{bail, Context};
 use serde::Deserialize;
 
 use crate::agent::claude::ClaudeRunner;
+use crate::agent::lmstudio::LmstudioRunner;
 use crate::agent::noop::NoopRunner;
 use crate::agent::AgentRunner;
 use crate::task_source::caldav::CaldavTaskSource;
@@ -53,6 +54,7 @@ pub enum RunnerConfig {
     #[default]
     Claude,
     Noop,
+    Lmstudio(LmstudioConfig),
 }
 
 impl RunnerConfig {
@@ -60,8 +62,33 @@ impl RunnerConfig {
         match self {
             RunnerConfig::Claude => Box::new(ClaudeRunner),
             RunnerConfig::Noop => Box::new(NoopRunner),
+            RunnerConfig::Lmstudio(cfg) => Box::new(LmstudioRunner::new(cfg.clone())),
         }
     }
+}
+
+/// Configuration for the LM Studio agent runner, which drives a local LM
+/// Studio server's OpenAI-compatible API through a tool-calling loop.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LmstudioConfig {
+    /// Base URL of the local LM Studio server's OpenAI-compatible API.
+    #[serde(default = "default_lmstudio_base_url")]
+    pub base_url: String,
+    /// Which model to request from LM Studio. If omitted, LM Studio uses
+    /// whichever model is currently loaded.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Maximum number of tool-calling round trips before giving up.
+    #[serde(default = "default_lmstudio_max_iterations")]
+    pub max_iterations: u32,
+}
+
+fn default_lmstudio_base_url() -> String {
+    "http://localhost:1234/v1".to_string()
+}
+
+fn default_lmstudio_max_iterations() -> u32 {
+    20
 }
 
 #[derive(Debug, Deserialize)]
@@ -305,6 +332,55 @@ targets:
             cfg.targets["main"].project.agent,
             RunnerConfig::Noop
         ));
+    }
+
+    #[test]
+    fn agent_can_be_set_to_lmstudio_with_defaults() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: dummy
+    project:
+      path: "/tmp/project"
+      agent:
+        type: lmstudio
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        match &cfg.targets["main"].project.agent {
+            RunnerConfig::Lmstudio(lmstudio) => {
+                assert_eq!(lmstudio.base_url, "http://localhost:1234/v1");
+                assert_eq!(lmstudio.model, None);
+                assert_eq!(lmstudio.max_iterations, 20);
+            }
+            _ => panic!("expected lmstudio agent"),
+        }
+    }
+
+    #[test]
+    fn agent_can_be_set_to_lmstudio_with_custom_settings() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: dummy
+    project:
+      path: "/tmp/project"
+      agent:
+        type: lmstudio
+        base_url: "http://192.168.1.50:1234/v1"
+        model: "qwen2.5-coder-32b"
+        max_iterations: 5
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        match &cfg.targets["main"].project.agent {
+            RunnerConfig::Lmstudio(lmstudio) => {
+                assert_eq!(lmstudio.base_url, "http://192.168.1.50:1234/v1");
+                assert_eq!(lmstudio.model.as_deref(), Some("qwen2.5-coder-32b"));
+                assert_eq!(lmstudio.max_iterations, 5);
+            }
+            _ => panic!("expected lmstudio agent"),
+        }
     }
 
     fn multi_target_yaml() -> &'static str {

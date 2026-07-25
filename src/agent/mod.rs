@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod lmstudio;
 pub mod noop;
 
 use std::path::Path;

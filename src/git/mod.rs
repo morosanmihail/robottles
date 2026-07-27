@@ -5,6 +5,8 @@ use anyhow::{bail, Context};
 
 use crate::task_source::ical::Task;
 
+pub mod github;
+
 /// True if `project_dir` is inside a git working tree.
 pub fn is_git_repo(project_dir: &Path) -> bool {
     Command::new("git")

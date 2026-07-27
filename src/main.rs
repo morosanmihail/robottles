@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Context};
 
-use robottles::config::{Config, ExecutionConfig, TargetConfig};
+use robottles::config::{Config, ExecutionConfig, PullRequestConfig, TargetConfig};
+use robottles::git::github::{open_pull_request, origin_url, parse_github_remote};
 use robottles::git::{
     cleanup_unused_branch, commit_changes, is_git_repo, prepare_branch, sync_default_branch,
     working_tree_dirty,
@@ -122,14 +123,16 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
 
     let branch = derive_branch_name(task);
 
-    if project.git_enabled {
-        sync_default_branch(&project.path)
+    let default_branch = if project.git_enabled {
+        let default_branch = sync_default_branch(&project.path)
             .with_context(|| format!("syncing default branch in {}", project.path.display()))?;
         prepare_branch(&project.path, &branch)
             .with_context(|| format!("preparing branch {branch} for task {}", task.uid))?;
+        Some(default_branch)
     } else {
         println!("Skipping git operations (git_enabled is disabled in config).");
-    }
+        None
+    };
 
     let prompt = build_prompt(task);
     let runner = project.agent.build();
@@ -141,6 +144,20 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
                 commit_changes(&project.path, &branch, task).with_context(|| {
                     format!("committing task {} changes to branch {branch}", task.uid)
                 })?;
+
+                if let Some(pr_config) = &project.pull_request {
+                    let base = pr_config
+                        .base_branch
+                        .clone()
+                        .or_else(|| default_branch.clone())
+                        .unwrap_or_else(|| "main".to_string());
+                    match open_task_pull_request(&project.path, &branch, &base, task, pr_config) {
+                        Ok(url) => println!("Opened pull request: {url}"),
+                        Err(err) => {
+                            eprintln!("Failed to open pull request for branch {branch}: {err:#}")
+                        }
+                    }
+                }
             } else {
                 println!("Skipping git commit (commit_changes is disabled in config).");
             }
@@ -158,6 +175,52 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
         .with_context(|| format!("marking task {} as completed", task.uid))?;
 
     Ok(())
+}
+
+/// Open a GitHub pull request for a just-pushed task branch. The project's
+/// `origin` remote must point at a `github.com` repository; anything else
+/// (a different git host, or no `origin` at all) is reported as an error
+/// for the caller to log rather than treat as fatal.
+fn open_task_pull_request(
+    project_dir: &std::path::Path,
+    branch: &str,
+    base: &str,
+    task: &Task,
+    pr_config: &PullRequestConfig,
+) -> anyhow::Result<String> {
+    let remote = origin_url(project_dir).context("reading origin remote url")?;
+    let repo = parse_github_remote(&remote)
+        .with_context(|| format!("origin remote '{remote}' is not a github.com repository"))?;
+    open_pull_request(
+        &repo,
+        &pr_config.token,
+        branch,
+        base,
+        &pr_title(task),
+        &pr_body(task),
+    )
+    .with_context(|| format!("opening pull request for {}/{}", repo.owner, repo.name))
+}
+
+/// Title for the pull request opened for a completed task.
+fn pr_title(task: &Task) -> String {
+    format!("Complete task: {}", task.summary)
+}
+
+/// Body for the pull request opened for a completed task: a note that it's
+/// automated, a link back to the task's source (if any), and the task
+/// description (if any).
+fn pr_body(task: &Task) -> String {
+    let mut body = format!("Automated pull request for task `{}`.", task.uid);
+    if !task.href.is_empty() {
+        body.push_str(&format!("\n\nSource: {}", task.href));
+    }
+    if let Some(description) = &task.description
+        && !description.trim().is_empty()
+    {
+        body.push_str(&format!("\n\n---\n\n{description}"));
+    }
+    body
 }
 
 fn build_prompt(task: &Task) -> String {
@@ -243,6 +306,7 @@ mod tests {
                 commit_changes: true,
                 git_enabled,
                 agent: RunnerConfig::Noop,
+                pull_request: None,
             },
         }
     }
@@ -362,5 +426,41 @@ mod tests {
     fn branch_name_defaults_to_task_when_everything_empty() {
         let task = task_with("", "", None);
         assert_eq!(derive_branch_name(&task), "task");
+    }
+
+    #[test]
+    fn pr_title_uses_task_summary() {
+        let task = task_with("42", "Fix the login bug", None);
+        assert_eq!(pr_title(&task), "Complete task: Fix the login bug");
+    }
+
+    #[test]
+    fn pr_body_includes_uid_source_and_description() {
+        let mut task = task_with("42", "Fix the login bug", Some("Details here"));
+        task.href = "https://github.com/o/r/issues/42".to_string();
+        let body = pr_body(&task);
+        assert!(body.contains("task `42`"));
+        assert!(body.contains("Source: https://github.com/o/r/issues/42"));
+        assert!(body.contains("Details here"));
+    }
+
+    #[test]
+    fn pr_body_omits_source_when_href_empty() {
+        let task = task_with("42", "Fix the login bug", None);
+        let body = pr_body(&task);
+        assert!(!body.contains("Source:"));
+    }
+
+    #[test]
+    fn open_task_pull_request_errors_cleanly_on_non_github_remote() {
+        let (_origin, work) = init_repo_with_origin();
+        let task = task_with("42", "Fix the login bug", None);
+        let pr_config = robottles::config::PullRequestConfig {
+            token: "unused".to_string(),
+            base_branch: None,
+        };
+        let err = open_task_pull_request(work.path(), "task_branch", "main", &task, &pr_config)
+            .unwrap_err();
+        assert!(err.to_string().contains("not a github.com repository"));
     }
 }

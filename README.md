@@ -53,6 +53,10 @@ By default robottles syncs the default branch, creates a per-task branch, and co
 
 If `git_enabled` is left at its default (`true`) but the configured `project.path` isn't actually a git repository, the target fails cleanly instead of running git commands against it: in one-shot mode robottles logs the error and exits with status 0; in loop mode it logs the error and moves on to the next iteration, same as any other per-iteration failure.
 
+## Opening pull requests automatically
+
+Set `project.pull_request.token` to a GitHub personal access token (with pull-request write access) to have robottles open a PR from the task branch after pushing it, and print the PR's URL to the run log. This works regardless of task source — CalDAV, Jira, GitHub issues, whatever — as long as the project folder's `origin` remote is a `github.com` repository. The PR is opened against the repo's default branch unless `pull_request.base_branch` overrides it. If a PR already exists for the branch (e.g. a re-run), the existing PR's URL is logged instead of failing. Failure to open a PR (wrong token, non-GitHub remote, etc.) is logged but doesn't fail the task — the branch is already pushed either way. See `config.yaml.example` for the full format.
+
 ## Loop mode
 
 By default robottles does one task and exits. Set `execution.mode: loop` in `config.yaml` to instead have it run forever: each iteration picks a task for the next configured target (cycling round-robin through all of them), then sleeps `execution.delay_secs` (default 300, i.e. 5 minutes) before moving on. It keeps going until manually stopped (e.g. Ctrl-C). A failure on one iteration is logged and doesn't stop the loop.

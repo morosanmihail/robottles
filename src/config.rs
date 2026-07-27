@@ -221,10 +221,29 @@ pub struct ProjectConfig {
     /// Which agent runner carries out the task. Defaults to `claude`.
     #[serde(default)]
     pub agent: RunnerConfig,
+    /// If set, automatically open a GitHub pull request for the task branch
+    /// after it's pushed. The project's `origin` remote must be a
+    /// `github.com` repository. Ignored if `git_enabled` or
+    /// `commit_changes` is `false`, or if the agent made no changes.
+    #[serde(default)]
+    pub pull_request: Option<PullRequestConfig>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PullRequestConfig {
+    /// GitHub personal access token used to open the pull request. Needs
+    /// the `repo` scope (or, for a fine-grained token, "Pull requests"
+    /// write access) on the target repository.
+    pub token: String,
+    /// Base branch to open the pull request against. Defaults to the
+    /// repository's default branch (the same one task branches are created
+    /// from).
+    #[serde(default)]
+    pub base_branch: Option<String>,
 }
 
 impl Config {
@@ -485,6 +504,56 @@ targets:
 "#;
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         assert!(!cfg.targets["main"].project.git_enabled);
+    }
+
+    #[test]
+    fn pull_request_defaults_to_none() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: dummy
+    project:
+      path: "/tmp/project"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.targets["main"].project.pull_request.is_none());
+    }
+
+    #[test]
+    fn pull_request_can_be_configured() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: dummy
+    project:
+      path: "/tmp/project"
+      pull_request:
+        token: "ghp_mytoken"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        let pr = cfg.targets["main"].project.pull_request.as_ref().unwrap();
+        assert_eq!(pr.token, "ghp_mytoken");
+        assert_eq!(pr.base_branch, None);
+    }
+
+    #[test]
+    fn pull_request_base_branch_can_be_set() {
+        let yaml = r#"
+targets:
+  main:
+    source:
+      type: dummy
+    project:
+      path: "/tmp/project"
+      pull_request:
+        token: "ghp_mytoken"
+        base_branch: "develop"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        let pr = cfg.targets["main"].project.pull_request.as_ref().unwrap();
+        assert_eq!(pr.base_branch.as_deref(), Some("develop"));
     }
 
     #[test]

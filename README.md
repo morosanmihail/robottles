@@ -6,6 +6,10 @@ Like in that song, 99 bottles of beer on the wall, except this time it's tasks a
 
 And thus robot + bottles = robottles. 
 
+
+https://github.com/user-attachments/assets/a765ae61-a3e6-42f1-9e06-2f0663190f16
+
+
 ## What does it do? 
 
 Connect it to a CalDAV calendar, with tasks, and it will pick up the highest priority incomplete task, tell Claude: "oy, do this task", then marks it as complete, then pushes the new changes to a new branch.

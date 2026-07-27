@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{bail, Context};
+use log::{error, info, warn};
 
 use robottles::config::{Config, ExecutionConfig, PullRequestConfig, TargetConfig};
 use robottles::git::github::{open_pull_request, origin_url, parse_github_remote};
@@ -33,6 +34,8 @@ impl fmt::Display for NotAGitRepo {
 impl std::error::Error for NotAGitRepo {}
 
 fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
     let mut args = std::env::args().skip(1);
     let config_path = args
         .next()
@@ -49,7 +52,7 @@ fn main() -> anyhow::Result<()> {
                 .context("selecting target to run against")?;
             match run_task(target) {
                 Err(err) if err.downcast_ref::<NotAGitRepo>().is_some() => {
-                    eprintln!("Error: {err}");
+                    warn!("{err}");
                     Ok(())
                 }
                 other => other,
@@ -74,16 +77,16 @@ fn run_loop(cfg: &Config, delay: Duration) -> anyhow::Result<()> {
     let mut iteration = 0usize;
     loop {
         let name = &target_names[next_target_index(target_names.len(), iteration)];
-        println!("=== Loop iteration: target '{name}' ===");
+        info!("=== Loop iteration: target '{name}' ===");
         let target = cfg
             .target(name)
             .unwrap_or_else(|| panic!("target '{name}' vanished from config"));
         if let Err(err) = run_task(target) {
-            eprintln!("Error running task for target '{name}': {err:?}");
+            error!("running task for target '{name}': {err:?}");
         }
         iteration += 1;
 
-        println!("Sleeping {}s before next iteration", delay.as_secs());
+        info!("Sleeping {}s before next iteration", delay.as_secs());
         std::thread::sleep(delay);
     }
 }
@@ -99,13 +102,13 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
     let project = target.project;
     let source = target.source.build();
 
-    println!("Fetching next task");
+    info!("Fetching next task");
     let Some(task) = source.get_next_task()? else {
-        println!("No open tasks found. Nothing to do.");
+        info!("No open tasks found. Nothing to do.");
         return Ok(());
     };
     let task = &task;
-    println!(
+    info!(
         "Picked task [{}]: {} (priority={:?}, due={:?})",
         task.uid, task.summary, task.priority, task.due
     );
@@ -130,7 +133,7 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
             .with_context(|| format!("preparing branch {branch} for task {}", task.uid))?;
         Some(default_branch)
     } else {
-        println!("Skipping git operations (git_enabled is disabled in config).");
+        info!("Skipping git operations (git_enabled is disabled in config).");
         None
     };
 
@@ -152,24 +155,24 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
                         .or_else(|| default_branch.clone())
                         .unwrap_or_else(|| "main".to_string());
                     match open_task_pull_request(&project.path, &branch, &base, task, pr_config) {
-                        Ok(url) => println!("Opened pull request: {url}"),
+                        Ok(url) => info!("Opened pull request: {url}"),
                         Err(err) => {
-                            eprintln!("Failed to open pull request for branch {branch}: {err:#}")
+                            error!("failed to open pull request for branch {branch}: {err:#}")
                         }
                     }
                 }
             } else {
-                println!("Skipping git commit (commit_changes is disabled in config).");
+                info!("Skipping git commit (commit_changes is disabled in config).");
             }
         } else {
-            println!("Agent made no changes; cleaning up branch {branch}.");
+            info!("Agent made no changes; cleaning up branch {branch}.");
             cleanup_unused_branch(&project.path, &branch).with_context(|| {
                 format!("cleaning up unused branch {branch} for task {}", task.uid)
             })?;
         }
     }
 
-    println!("Marking task [{}] as completed", task.uid);
+    info!("Marking task [{}] as completed", task.uid);
     source
         .mark_completed(task)
         .with_context(|| format!("marking task {} as completed", task.uid))?;

@@ -3,6 +3,7 @@ use std::process::{Command, ExitStatus};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context};
+use log::info;
 
 use super::AgentRunner;
 use crate::git::print_git_status;
@@ -19,7 +20,7 @@ pub struct ClaudeRunner;
 
 impl AgentRunner for ClaudeRunner {
     fn run(&self, project_dir: &Path, prompt: &str) -> anyhow::Result<()> {
-        println!("Starting Claude session in {}", project_dir.display());
+        info!("Starting Claude session in {}", project_dir.display());
 
         let mut command = Command::new("claude");
         command

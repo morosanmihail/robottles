@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context};
+use log::info;
 use serde_json::{json, Value};
 
 use super::AgentRunner;
@@ -30,7 +31,7 @@ impl LmstudioRunner {
 
 impl AgentRunner for LmstudioRunner {
     fn run(&self, project_dir: &Path, prompt: &str) -> anyhow::Result<()> {
-        println!(
+        info!(
             "Starting LM Studio session against {} in {}",
             self.config.base_url,
             project_dir.display()
@@ -63,7 +64,7 @@ impl AgentRunner for LmstudioRunner {
 
             if tool_calls.is_empty() {
                 if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
-                    println!("LM Studio finished: {content}");
+                    info!("LM Studio finished: {content}");
                 }
                 print_git_status(project_dir);
                 return Ok(());

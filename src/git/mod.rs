@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, Context};
+use log::{error, info, warn};
 
 use crate::task_source::ical::Task;
 
@@ -24,13 +25,12 @@ pub fn print_git_status(project_dir: &Path) {
         .output()
     {
         Ok(output) => {
-            println!("--- git status ---");
-            print!("{}", String::from_utf8_lossy(&output.stdout));
+            info!("--- git status ---\n{}", String::from_utf8_lossy(&output.stdout).trim_end());
             if !output.stderr.is_empty() {
-                eprint!("{}", String::from_utf8_lossy(&output.stderr));
+                warn!("{}", String::from_utf8_lossy(&output.stderr).trim_end());
             }
         }
-        Err(e) => eprintln!("failed to run `git status`: {e}"),
+        Err(e) => error!("failed to run `git status`: {e}"),
     }
 }
 
@@ -48,7 +48,7 @@ fn stash_if_dirty(project_dir: &Path, reason: &str) -> anyhow::Result<()> {
                 &format!("auto-worker: stashed before {reason}"),
             ],
         )?;
-        println!("Stashed pre-existing changes before {reason}.");
+        info!("Stashed pre-existing changes before {reason}.");
     }
     Ok(())
 }
@@ -68,7 +68,7 @@ pub fn sync_default_branch(project_dir: &Path) -> anyhow::Result<String> {
 
     if has_remote(project_dir, "origin")? {
         run_git(project_dir, &["pull", "--ff-only", "origin", &default])?;
-        println!("Pulled latest changes for {default} from origin.");
+        info!("Pulled latest changes for {default} from origin.");
     }
 
     Ok(default)
@@ -116,7 +116,7 @@ pub fn prepare_branch(project_dir: &Path, branch: &str) -> anyhow::Result<()> {
 /// `origin`. Skips the commit if there's nothing to commit.
 pub fn commit_changes(project_dir: &Path, branch: &str, task: &Task) -> anyhow::Result<()> {
     if !working_tree_dirty(project_dir)? {
-        println!("No changes to commit on branch {branch}.");
+        info!("No changes to commit on branch {branch}.");
         return Ok(());
     }
 
@@ -126,7 +126,7 @@ pub fn commit_changes(project_dir: &Path, branch: &str, task: &Task) -> anyhow::
         &["commit", "-m", &format!("Complete task: {}", task.summary)],
     )?;
     run_git(project_dir, &["push", "-u", "origin", branch])?;
-    println!("Pushed branch {branch} to origin.");
+    info!("Pushed branch {branch} to origin.");
 
     Ok(())
 }
@@ -197,7 +197,7 @@ pub fn cleanup_unused_branch(project_dir: &Path, branch: &str) -> anyhow::Result
 
     run_git(project_dir, &["checkout", &default])?;
     run_git(project_dir, &["branch", "-D", branch])?;
-    println!("No changes made; deleted branch {branch} and switched back to {default}.");
+    info!("No changes made; deleted branch {branch} and switched back to {default}.");
 
     Ok(())
 }

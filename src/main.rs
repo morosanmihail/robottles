@@ -211,13 +211,11 @@ fn pr_title(task: &Task) -> String {
 }
 
 /// Body for the pull request opened for a completed task: a note that it's
-/// automated, a link back to the task's source (if any), and the task
-/// description (if any).
+/// automated, followed by the task description (if any). Deliberately omits
+/// the task's id/href — those are internal to the task source, not useful
+/// context for a PR reviewer.
 fn pr_body(task: &Task) -> String {
-    let mut body = format!("Automated pull request for task `{}`.", task.uid);
-    if !task.href.is_empty() {
-        body.push_str(&format!("\n\nSource: {}", task.href));
-    }
+    let mut body = format!("Automated pull request for task `{}`.", task.summary);
     if let Some(description) = &task.description
         && !description.trim().is_empty()
     {
@@ -438,20 +436,22 @@ mod tests {
     }
 
     #[test]
-    fn pr_body_includes_uid_source_and_description() {
+    fn pr_body_includes_summary_and_description() {
         let mut task = task_with("42", "Fix the login bug", Some("Details here"));
         task.href = "https://github.com/o/r/issues/42".to_string();
         let body = pr_body(&task);
-        assert!(body.contains("task `42`"));
-        assert!(body.contains("Source: https://github.com/o/r/issues/42"));
+        assert!(body.contains("task `Fix the login bug`"));
         assert!(body.contains("Details here"));
     }
 
     #[test]
-    fn pr_body_omits_source_when_href_empty() {
-        let task = task_with("42", "Fix the login bug", None);
+    fn pr_body_omits_uid_and_source() {
+        let mut task = task_with("42", "Fix the login bug", None);
+        task.href = "https://github.com/o/r/issues/42".to_string();
         let body = pr_body(&task);
+        assert!(!body.contains("42"));
         assert!(!body.contains("Source:"));
+        assert!(!body.contains("https://github.com/o/r/issues/42"));
     }
 
     #[test]

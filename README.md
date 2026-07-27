@@ -47,10 +47,6 @@ robottles config.yaml project2
 
 A single run only ever works on one task in one target's project folder, even if several targets are configured. If the config only has one target, the name can be omitted. See `config.yaml.example` for the full format.
 
-## Logging
-
-robottles logs via [`env_logger`](https://docs.rs/env_logger), defaulting to `info` level. Control verbosity with the `RUST_LOG` environment variable, e.g. `RUST_LOG=debug robottles config.yaml` or `RUST_LOG=robottles=warn robottles config.yaml`.
-
 ## Disabling git
 
 By default robottles syncs the default branch, creates a per-task branch, and commits/pushes the agent's changes to git for every target. Set `project.git_enabled: false` for a target to skip all of that — useful for a project folder that isn't a git repository at all. `project.commit_changes` is ignored when `git_enabled` is false.

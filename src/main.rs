@@ -5,8 +5,9 @@ use std::time::Duration;
 use anyhow::{bail, Context};
 use log::{error, info, warn};
 
-use robottles::config::{Config, ExecutionConfig, PullRequestConfig, TargetConfig};
-use robottles::git::github::{open_pull_request, origin_url, parse_github_remote};
+use robottles::config::{Config, ExecutionConfig, TargetConfig};
+use robottles::git::branch_name::derive_branch_name;
+use robottles::git::pull_request::open_task_pull_request;
 use robottles::git::{
     cleanup_unused_branch, commit_changes, is_git_repo, prepare_branch, sync_default_branch,
     working_tree_dirty,
@@ -180,50 +181,6 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Open a GitHub pull request for a just-pushed task branch. The project's
-/// `origin` remote must point at a `github.com` repository; anything else
-/// (a different git host, or no `origin` at all) is reported as an error
-/// for the caller to log rather than treat as fatal.
-fn open_task_pull_request(
-    project_dir: &std::path::Path,
-    branch: &str,
-    base: &str,
-    task: &Task,
-    pr_config: &PullRequestConfig,
-) -> anyhow::Result<String> {
-    let remote = origin_url(project_dir).context("reading origin remote url")?;
-    let repo = parse_github_remote(&remote)
-        .with_context(|| format!("origin remote '{remote}' is not a github.com repository"))?;
-    open_pull_request(
-        &repo,
-        &pr_config.token,
-        branch,
-        base,
-        &pr_title(task),
-        &pr_body(task),
-    )
-    .with_context(|| format!("opening pull request for {}/{}", repo.owner, repo.name))
-}
-
-/// Title for the pull request opened for a completed task.
-fn pr_title(task: &Task) -> String {
-    format!("Complete task: {}", task.summary)
-}
-
-/// Body for the pull request opened for a completed task: a note that it's
-/// automated, followed by the task description (if any). Deliberately omits
-/// the task's id/href — those are internal to the task source, not useful
-/// context for a PR reviewer.
-fn pr_body(task: &Task) -> String {
-    let mut body = format!("Automated pull request for task `{}`.", task.summary);
-    if let Some(description) = &task.description
-        && !description.trim().is_empty()
-    {
-        body.push_str(&format!("\n\n---\n\n{description}"));
-    }
-    body
-}
-
 fn build_prompt(task: &Task) -> String {
     let mut prompt = format!("Please complete the following task:\n\n{}\n", task.summary);
     if let Some(description) = &task.description
@@ -235,67 +192,10 @@ fn build_prompt(task: &Task) -> String {
     prompt
 }
 
-/// Derive a git branch name from a task: prefer a sanitized version of the
-/// CalDAV UID, falling back to an underscore-separated slug of the
-/// description (or summary, if there's no description) when the UID is
-/// empty.
-fn derive_branch_name(task: &Task) -> String {
-    let from_uid = sanitize_branch_component(&task.uid);
-    if !from_uid.is_empty() {
-        return from_uid;
-    }
-
-    let source = task
-        .description
-        .as_deref()
-        .filter(|d| !d.trim().is_empty())
-        .unwrap_or(&task.summary);
-    let slug = sanitize_branch_component(source);
-    if slug.is_empty() {
-        "task".to_string()
-    } else {
-        slug
-    }
-}
-
-/// Turn arbitrary text into a lowercase, underscore-separated slug safe to
-/// use as a git branch name component (runs of anything that isn't
-/// alphanumeric collapse to a single `_`, and leading/trailing `_` are
-/// trimmed).
-fn sanitize_branch_component(s: &str) -> String {
-    let mut result = String::new();
-    let mut last_was_sep = true;
-    for c in s.chars() {
-        if c.is_ascii_alphanumeric() {
-            result.push(c.to_ascii_lowercase());
-            last_was_sep = false;
-        } else if !last_was_sep {
-            result.push('_');
-            last_was_sep = true;
-        }
-    }
-    while result.ends_with('_') {
-        result.pop();
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use robottles::config::{ProjectConfig, RunnerConfig, SourceConfig};
-
-    fn task_with(uid: &str, summary: &str, description: Option<&str>) -> Task {
-        Task {
-            uid: uid.to_string(),
-            summary: summary.to_string(),
-            status: None,
-            priority: None,
-            due: None,
-            description: description.map(str::to_string),
-            href: String::new(),
-        }
-    }
 
     /// A dummy-source, noop-agent target against `path`, so `run_task` can be
     /// exercised end to end without a real task supplier or coding agent.
@@ -405,65 +305,4 @@ mod tests {
         assert_eq!(next_target_index(1, 5), 0);
     }
 
-    #[test]
-    fn branch_name_prefers_uid() {
-        let task = task_with("20260724T191500Z-abc123@host.example", "Some summary", None);
-        assert_eq!(derive_branch_name(&task), "20260724t191500z_abc123_host_example");
-    }
-
-    #[test]
-    fn branch_name_falls_back_to_description() {
-        let task = task_with("", "Fallback summary", Some("Fix the login bug!!"));
-        assert_eq!(derive_branch_name(&task), "fix_the_login_bug");
-    }
-
-    #[test]
-    fn branch_name_falls_back_to_summary_without_description() {
-        let task = task_with("", "Fix the login bug", None);
-        assert_eq!(derive_branch_name(&task), "fix_the_login_bug");
-    }
-
-    #[test]
-    fn branch_name_defaults_to_task_when_everything_empty() {
-        let task = task_with("", "", None);
-        assert_eq!(derive_branch_name(&task), "task");
-    }
-
-    #[test]
-    fn pr_title_uses_task_summary() {
-        let task = task_with("42", "Fix the login bug", None);
-        assert_eq!(pr_title(&task), "Complete task: Fix the login bug");
-    }
-
-    #[test]
-    fn pr_body_includes_summary_and_description() {
-        let mut task = task_with("42", "Fix the login bug", Some("Details here"));
-        task.href = "https://github.com/o/r/issues/42".to_string();
-        let body = pr_body(&task);
-        assert!(body.contains("task `Fix the login bug`"));
-        assert!(body.contains("Details here"));
-    }
-
-    #[test]
-    fn pr_body_omits_uid_and_source() {
-        let mut task = task_with("42", "Fix the login bug", None);
-        task.href = "https://github.com/o/r/issues/42".to_string();
-        let body = pr_body(&task);
-        assert!(!body.contains("42"));
-        assert!(!body.contains("Source:"));
-        assert!(!body.contains("https://github.com/o/r/issues/42"));
-    }
-
-    #[test]
-    fn open_task_pull_request_errors_cleanly_on_non_github_remote() {
-        let (_origin, work) = init_repo_with_origin();
-        let task = task_with("42", "Fix the login bug", None);
-        let pr_config = robottles::config::PullRequestConfig {
-            token: "unused".to_string(),
-            base_branch: None,
-        };
-        let err = open_task_pull_request(work.path(), "task_branch", "main", &task, &pr_config)
-            .unwrap_err();
-        assert!(err.to_string().contains("not a github.com repository"));
-    }
 }

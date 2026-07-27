@@ -202,13 +202,11 @@ fn extract_calendar_data(xml: &str) -> anyhow::Result<Vec<ResourceBlock>> {
             Event::End(e) => match e.local_name().as_ref() {
                 b"href" => in_href = false,
                 b"calendar-data" => in_calendar_data = false,
-                b"response" => {
-                    if !current_ical.is_empty() {
-                        blocks.push(ResourceBlock {
-                            href: std::mem::take(&mut current_href),
-                            ical: std::mem::take(&mut current_ical),
-                        });
-                    }
+                b"response" if !current_ical.is_empty() => {
+                    blocks.push(ResourceBlock {
+                        href: std::mem::take(&mut current_href),
+                        ical: std::mem::take(&mut current_ical),
+                    });
                 }
                 _ => {}
             },

@@ -6,7 +6,9 @@ use log::{error, info, warn};
 
 use crate::task_source::ical::Task;
 
+pub mod branch_name;
 pub mod github;
+pub mod pull_request;
 
 /// True if `project_dir` is inside a git working tree.
 pub fn is_git_repo(project_dir: &Path) -> bool {
@@ -397,7 +399,7 @@ mod tests {
     #[test]
     fn sync_default_branch_checks_out_main_and_pulls_remote_changes() {
         let (origin, work) = init_repo_with_origin();
-        prepare_branch(&work.path(), "task_branch").unwrap();
+        prepare_branch(work.path(), "task_branch").unwrap();
         assert_eq!(current_branch(work.path()).unwrap(), "task_branch");
 
         // Simulate a teammate pushing a new commit to origin/main while this
@@ -426,7 +428,7 @@ mod tests {
     #[test]
     fn sync_default_branch_stashes_dirty_changes_before_switching() {
         let (_origin, work) = init_repo_with_origin();
-        prepare_branch(&work.path(), "task_branch").unwrap();
+        prepare_branch(work.path(), "task_branch").unwrap();
 
         std::fs::write(work.path().join("README.md"), "dirty change\n").unwrap();
         assert!(working_tree_dirty(work.path()).unwrap());

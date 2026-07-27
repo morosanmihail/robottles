@@ -2,7 +2,7 @@ use anyhow::{bail, Context};
 use serde::Deserialize;
 
 use super::ical::Task;
-use super::TaskSource;
+use super::{CompletionMetadata, TaskSource};
 use crate::config::JiraConfig;
 
 /// A task source backed by a Jira board. Priority is derived from the
@@ -31,7 +31,10 @@ impl TaskSource for JiraTaskSource {
         Ok(ranked.into_iter().next().map(|(_, issue)| issue_to_task(issue)))
     }
 
-    fn mark_completed(&self, task: &Task) -> anyhow::Result<()> {
+    fn mark_completed(&self, task: &Task, metadata: &CompletionMetadata) -> anyhow::Result<()> {
+        if let Some(pr_url) = &metadata.pr_url {
+            add_comment(&self.config, task, &format!("Opened pull request: {pr_url}"))?;
+        }
         transition_issue(&self.config, task)
     }
 }
@@ -140,6 +143,26 @@ fn fetch_todo_issues(cfg: &JiraConfig) -> anyhow::Result<Vec<JiraIssue>> {
     let parsed: JiraSearchResponse =
         serde_json::from_str(&body).context("parsing Jira search response")?;
     Ok(parsed.issues)
+}
+
+/// Post `body` as a comment on `task`'s issue (`href` is the issue's API url).
+fn add_comment(cfg: &JiraConfig, task: &Task, body: &str) -> anyhow::Result<()> {
+    let url = format!("{}/comment", task.href);
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(&url)
+        .basic_auth(&cfg.email, Some(&cfg.api_token))
+        .json(&serde_json::json!({ "body": body }))
+        .send()
+        .with_context(|| format!("commenting on Jira issue at {url}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().unwrap_or_default();
+        bail!("commenting on issue {} failed: {status}: {text}", task.uid);
+    }
+
+    Ok(())
 }
 
 /// Transition `task`'s issue to `review_status` (`href` is the issue's API

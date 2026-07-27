@@ -1,5 +1,5 @@
 use super::ical::Task;
-use super::TaskSource;
+use super::{CompletionMetadata, TaskSource};
 
 /// A no-op task source, mainly useful for testing/dry-running auto_worker
 /// without wiring up a real supplier: it always hands back a single task
@@ -19,7 +19,7 @@ impl TaskSource for DummyTaskSource {
         }))
     }
 
-    fn mark_completed(&self, _task: &Task) -> anyhow::Result<()> {
+    fn mark_completed(&self, _task: &Task, _metadata: &CompletionMetadata) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -37,6 +37,8 @@ mod tests {
     #[test]
     fn mark_completed_is_a_no_op() {
         let task = DummyTaskSource.get_next_task().unwrap().unwrap();
-        assert!(DummyTaskSource.mark_completed(&task).is_ok());
+        assert!(DummyTaskSource
+            .mark_completed(&task, &CompletionMetadata::default())
+            .is_ok());
     }
 }

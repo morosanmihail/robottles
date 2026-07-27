@@ -3,7 +3,7 @@ use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 
 use super::ical::{self, Task};
-use super::TaskSource;
+use super::{CompletionMetadata, TaskSource};
 use crate::config::CaldavConfig;
 
 const REPORT_BODY: &str = r#"<?xml version="1.0" encoding="utf-8" ?>
@@ -45,8 +45,9 @@ impl TaskSource for CaldavTaskSource {
         })
     }
 
-    fn mark_completed(&self, task: &Task) -> anyhow::Result<()> {
-        mark_completed(&self.config, task)
+    fn mark_completed(&self, task: &Task, metadata: &CompletionMetadata) -> anyhow::Result<()> {
+        let comment = metadata.pr_url.as_deref().map(|url| format!("Opened pull request: {url}"));
+        mark_completed(&self.config, task, comment.as_deref())
     }
 }
 
@@ -86,7 +87,7 @@ fn fetch_open_tasks(cfg: &CaldavConfig) -> anyhow::Result<Vec<Task>> {
 
 /// Mark `task`'s VTODO as completed on the CalDAV server: fetch the current
 /// resource, flip STATUS/COMPLETED/PERCENT-COMPLETE, and PUT it back.
-fn mark_completed(cfg: &CaldavConfig, task: &Task) -> anyhow::Result<()> {
+fn mark_completed(cfg: &CaldavConfig, task: &Task, comment: Option<&str>) -> anyhow::Result<()> {
     let base = reqwest::Url::parse(&cfg.url).context("parsing configured CalDAV url")?;
     let resource_url = base
         .join(&task.href)
@@ -110,7 +111,7 @@ fn mark_completed(cfg: &CaldavConfig, task: &Task) -> anyhow::Result<()> {
         bail!("fetching VTODO {resource_url} returned {get_status}: {ical_body}");
     }
 
-    let updated = ical::set_completed(&ical_body, &task.uid)
+    let updated = ical::set_completed(&ical_body, &task.uid, comment)
         .with_context(|| format!("marking task {} completed in ical text", task.uid))?;
 
     let mut request = client

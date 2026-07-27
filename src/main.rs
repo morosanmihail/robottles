@@ -13,6 +13,7 @@ use robottles::git::{
     working_tree_dirty,
 };
 use robottles::task_source::ical::Task;
+use robottles::task_source::CompletionMetadata;
 
 /// The configured project path has `git_enabled` set (the default) but isn't
 /// actually a git repository. Distinguished from other task-running errors
@@ -142,6 +143,7 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
     let runner = project.agent.build();
     runner.run(&project.path, &prompt)?;
 
+    let mut pr_url = None;
     if project.git_enabled {
         if working_tree_dirty(&project.path)? {
             if project.commit_changes {
@@ -156,7 +158,10 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
                         .or_else(|| default_branch.clone())
                         .unwrap_or_else(|| "main".to_string());
                     match open_task_pull_request(&project.path, &branch, &base, task, pr_config) {
-                        Ok(url) => info!("Opened pull request: {url}"),
+                        Ok(url) => {
+                            info!("Opened pull request: {url}");
+                            pr_url = Some(url);
+                        }
                         Err(err) => {
                             error!("failed to open pull request for branch {branch}: {err:#}")
                         }
@@ -174,8 +179,9 @@ fn run_task(target: TargetConfig) -> anyhow::Result<()> {
     }
 
     info!("Marking task [{}] as completed", task.uid);
+    let metadata = CompletionMetadata { pr_url };
     source
-        .mark_completed(task)
+        .mark_completed(task, &metadata)
         .with_context(|| format!("marking task {} as completed", task.uid))?;
 
     Ok(())

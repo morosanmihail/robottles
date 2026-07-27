@@ -50,6 +50,22 @@ fn unescape_text(value: &str) -> String {
     out
 }
 
+/// Escape RFC 5545 TEXT special characters (`\`, `;`, `,`, newline) for
+/// writing a property value back out.
+fn escape_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            ';' => out.push_str("\\;"),
+            ',' => out.push_str("\\,"),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// Parse every VTODO block found in an unfolded (or raw) iCalendar text blob.
 pub fn parse_vtodos(raw: &str) -> Vec<Task> {
     let text = unfold(raw);
@@ -122,11 +138,14 @@ pub fn is_open(task: &Task) -> bool {
 
 /// Return `raw` with the VTODO whose UID matches `uid` marked completed
 /// (STATUS/PERCENT-COMPLETE/COMPLETED set), leaving every other line —
-/// including any other VTODOs in the same resource — untouched.
+/// including any other VTODOs in the same resource — untouched. If `comment`
+/// is given, it's recorded as a `COMMENT` property (replacing any existing
+/// one) — used to leave e.g. the URL of the pull request opened for the
+/// task's changes.
 ///
 /// Errors if no VTODO with that UID is found, so callers don't silently
 /// PUT back an unchanged resource.
-pub fn set_completed(raw: &str, uid: &str) -> anyhow::Result<String> {
+pub fn set_completed(raw: &str, uid: &str, comment: Option<&str>) -> anyhow::Result<String> {
     let stamp = format_utc_now_ical();
     let text = unfold(raw);
 
@@ -150,12 +169,15 @@ pub fn set_completed(raw: &str, uid: &str) -> anyhow::Result<String> {
                     let name = l.split(':').next().unwrap_or("").split(';').next().unwrap_or("");
                     !matches!(
                         name.to_ascii_uppercase().as_str(),
-                        "STATUS" | "COMPLETED" | "PERCENT-COMPLETE"
+                        "STATUS" | "COMPLETED" | "PERCENT-COMPLETE" | "COMMENT"
                     )
                 });
                 vtodo_lines.push("STATUS:COMPLETED".to_string());
                 vtodo_lines.push(format!("COMPLETED:{stamp}"));
                 vtodo_lines.push("PERCENT-COMPLETE:100".to_string());
+                if let Some(comment) = comment {
+                    vtodo_lines.push(format!("COMMENT:{}", escape_text(comment)));
+                }
             }
             out.push_str("BEGIN:VTODO\r\n");
             for l in &vtodo_lines {
@@ -223,7 +245,7 @@ mod tests {
     #[test]
     fn set_completed_marks_matching_uid() {
         let ics = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:abc-123\r\nSUMMARY:Test task\r\nSTATUS:NEEDS-ACTION\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
-        let updated = set_completed(ics, "abc-123").unwrap();
+        let updated = set_completed(ics, "abc-123", None).unwrap();
         assert!(updated.contains("STATUS:COMPLETED"));
         assert!(updated.contains("PERCENT-COMPLETE:100"));
         assert!(updated.contains("COMPLETED:"));
@@ -234,7 +256,17 @@ mod tests {
     #[test]
     fn set_completed_errors_on_missing_uid() {
         let ics = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:other\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
-        assert!(set_completed(ics, "abc-123").is_err());
+        assert!(set_completed(ics, "abc-123", None).is_err());
+    }
+
+    #[test]
+    fn set_completed_records_comment_when_given() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VTODO\r\nUID:abc-123\r\nSUMMARY:Test task\r\nEND:VTODO\r\nEND:VCALENDAR\r\n";
+        let updated =
+            set_completed(ics, "abc-123", Some("Opened pull request: https://example.com/pr/1"))
+                .unwrap();
+        assert!(updated
+            .contains("COMMENT:Opened pull request: https://example.com/pr/1"));
     }
 
     #[test]

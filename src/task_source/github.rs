@@ -2,7 +2,7 @@ use anyhow::{bail, Context};
 use serde::Deserialize;
 
 use super::ical::Task;
-use super::TaskSource;
+use super::{CompletionMetadata, TaskSource};
 use crate::config::GithubConfig;
 
 /// A task source backed by open GitHub issues on a single repo. Priority is
@@ -30,7 +30,10 @@ impl TaskSource for GithubTaskSource {
         Ok(ranked.into_iter().next().map(|(_, issue)| issue_to_task(issue)))
     }
 
-    fn mark_completed(&self, task: &Task) -> anyhow::Result<()> {
+    fn mark_completed(&self, task: &Task, metadata: &CompletionMetadata) -> anyhow::Result<()> {
+        if let Some(pr_url) = &metadata.pr_url {
+            comment_on_issue(&self.config, task, &format!("Opened pull request: {pr_url}"))?;
+        }
         close_issue(&self.config, task)
     }
 }
@@ -116,6 +119,28 @@ fn fetch_open_issues(cfg: &GithubConfig) -> anyhow::Result<Vec<GithubIssue>> {
         serde_json::from_str(&body).context("parsing GitHub issues response")?;
 
     Ok(issues.into_iter().filter(|issue| issue.pull_request.is_none()).collect())
+}
+
+/// Post `body` as a comment on `task`'s issue (`href` is the issue's API url).
+fn comment_on_issue(cfg: &GithubConfig, task: &Task, body: &str) -> anyhow::Result<()> {
+    let url = format!("{}/comments", task.href);
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .post(&url)
+        .bearer_auth(&cfg.token)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "robottles")
+        .json(&serde_json::json!({ "body": body }))
+        .send()
+        .with_context(|| format!("commenting on GitHub issue at {url}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let text = response.text().unwrap_or_default();
+        bail!("commenting on issue {} failed: {status}: {text}", task.uid);
+    }
+
+    Ok(())
 }
 
 /// Close `task`'s issue on GitHub (`href` is the issue's API url).

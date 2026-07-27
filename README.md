@@ -8,7 +8,7 @@ And thus robot + bottles = robottles.
 
 ## What does it do? 
 
-Connect it to a CalDAV calendar, with tasks, and it will pick up the highest priority incomplete task and tell Claude: "oy, do it, then mark it as complete, then push the new changes to a new branch".
+Connect it to a CalDAV calendar, with tasks, and it will pick up the highest priority incomplete task, tell Claude: "oy, do this task", then marks it as complete, then pushes the new changes to a new branch.
 
 That's pretty much it. 
 Have it running on a schedule, have it run whenever you have spare compute or tokens or whatever.

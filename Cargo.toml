@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+env_logger = "0.11"
+log = "0.4"
 quick-xml = "0.36"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls", "json", "query"] }
 serde = { version = "1.0.229", features = ["derive"] }

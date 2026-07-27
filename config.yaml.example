@@ -39,6 +39,18 @@ targets:
       # be a git repository, the target fails cleanly instead of running git
       # commands against it.
       git_enabled: true
+      # Optional. If set, automatically open a GitHub pull request for the
+      # task branch after it's pushed (logging the PR URL). Requires the
+      # project's `origin` remote to be a github.com repository; ignored if
+      # `git_enabled` or `commit_changes` is false, or the agent made no
+      # changes.
+      pull_request:
+        # GitHub personal access token with pull-request write access on
+        # this repository.
+        token: "ghp_mytoken"
+        # Optional. Base branch to open the PR against. Defaults to the
+        # repository's default branch.
+        # base_branch: "main"
 
   project2:
     # To try things out without a real task supplier, use the dummy source
